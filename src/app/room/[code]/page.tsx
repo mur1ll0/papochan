@@ -8,7 +8,6 @@ import {
   Check,
   Users,
   Layers,
-  ArrowLeft,
   Sparkles,
 } from 'lucide-react';
 import { useCrypto } from '@/hooks/useCrypto';
@@ -80,15 +79,12 @@ export default function RoomPage() {
       media.engine?.destroy();
       await Promise.race([
         rtc.leave(),
-        new Promise((resolve) => setTimeout(resolve, 250)),
+        new Promise((resolve) => setTimeout(resolve, 200)),
       ]);
     } catch (err) {
       console.warn('[RoomPage] Error leaving room:', err);
     } finally {
       router.push('/');
-      if (typeof window !== 'undefined') {
-        window.location.href = '/';
-      }
     }
   };
 
@@ -151,6 +147,7 @@ export default function RoomPage() {
           onSetNoiseSuppressionMode={media.setNoiseSuppressionMode}
           onUpdateProfile={updateProfile}
           onJoin={() => setHasJoined(true)}
+          onCancel={handleLeaveCall}
         />
       </main>
     );
@@ -159,40 +156,32 @@ export default function RoomPage() {
   return (
     <main className="h-screen w-screen bg-slate-950 text-slate-100 flex flex-col overflow-hidden select-none">
       {/* Top Navigation Bar */}
-      <header className="h-14 border-b border-slate-800 bg-slate-950/90 backdrop-blur-xl px-4 flex items-center justify-between z-20 shrink-0">
-        {/* Left: Home Button & Room Code */}
+      <header className="h-16 border-b border-slate-800 bg-slate-950/90 backdrop-blur-xl px-4 sm:px-6 flex items-center justify-between z-20 shrink-0">
+        {/* Left: Room Logo & Room Code */}
         <div className="flex items-center gap-3">
-          <button
-            onClick={handleLeaveCall}
-            className="p-2 rounded-xl bg-slate-900 hover:bg-slate-850 border border-slate-800 text-slate-300 hover:text-white transition-colors cursor-pointer"
-            title="Voltar ao Início"
-          >
-            <ArrowLeft className="w-4 h-4" />
-          </button>
-
-          <div className="flex items-center gap-2">
-            <ChameleonLogo size={22} color="#FFFFFF" accentColor="#FF6B4A" />
-            <span className="text-xs text-slate-400 font-semibold hidden sm:inline">{t('room.header.roomCode')}</span>
-            <span className="text-xs font-mono font-bold text-chan-turquoise px-2 py-0.5 rounded-lg bg-slate-900 border border-slate-800">
+          <div className="flex items-center gap-2.5">
+            <ChameleonLogo size={28} variant="dark" />
+            <span className="text-sm text-slate-300 font-semibold hidden sm:inline">{t('room.header.roomCode')}</span>
+            <span className="text-sm font-mono font-bold text-chan-turquoise px-3 py-1 rounded-xl bg-slate-900 border border-slate-800 shadow-sm">
               {roomCode}
             </span>
             <button
               onClick={handleCopyLink}
-              className="p-1.5 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-900 transition-colors cursor-pointer"
+              className="p-2 rounded-xl text-slate-400 hover:text-slate-100 hover:bg-slate-900 transition-colors cursor-pointer"
               title={t('room.header.copyLink')}
             >
               {copiedLink ? (
-                <Check className="w-3.5 h-3.5 text-stealth-emerald" />
+                <Check className="w-4 h-4 text-stealth-emerald" />
               ) : (
-                <Copy className="w-3.5 h-3.5" />
+                <Copy className="w-4 h-4" />
               )}
             </button>
           </div>
 
           {/* Multi-Device Co-Presence Banner Indicator */}
           {sisterDevices.length > 0 && (
-            <div className="hidden md:flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-chan-turquoise/10 border border-chan-turquoise/30 text-chan-turquoise text-xs font-medium animate-pulse">
-              <Layers className="w-3.5 h-3.5" />
+            <div className="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-full bg-chan-turquoise/10 border border-chan-turquoise/30 text-chan-turquoise text-xs sm:text-sm font-semibold animate-pulse">
+              <Layers className="w-4 h-4" />
               <span>{t('room.header.sisterDevice')} ({sisterDevices.length + 1})</span>
             </div>
           )}
@@ -201,17 +190,17 @@ export default function RoomPage() {
         {/* Right: Security & Network Status */}
         <div className="flex items-center gap-3">
           {/* Peer Count */}
-          <div className="flex items-center gap-1.5 text-xs text-slate-300 font-medium bg-slate-900 px-2.5 py-1 rounded-full border border-slate-800">
-            <Users className="w-3.5 h-3.5 text-papo-coral" />
+          <div className="flex items-center gap-2 text-xs sm:text-sm text-slate-200 font-bold bg-slate-900 px-3 py-1.5 rounded-full border border-slate-800 shadow-sm">
+            <Users className="w-4 h-4 text-papo-coral" />
             <span>{rtc.peers.length + 1}</span>
           </div>
 
           {/* E2EE Shield Pill */}
           <button
             onClick={() => setIsSecurityOpen(true)}
-            className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-stealth-emerald/10 border border-stealth-emerald/40 text-stealth-emerald text-xs font-medium hover:bg-stealth-emerald/20 transition-colors cursor-pointer"
+            className="flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-stealth-emerald/15 border border-stealth-emerald/40 text-stealth-emerald text-xs sm:text-sm font-bold hover:bg-stealth-emerald/25 transition-colors cursor-pointer shadow-sm"
           >
-            <ShieldCheck className="w-3.5 h-3.5" />
+            <ShieldCheck className="w-4 h-4" />
             <span className="hidden sm:inline">{t('call.control.security')}</span>
           </button>
         </div>

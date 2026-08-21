@@ -20,11 +20,11 @@ export function LanguageSwitcher({ className = '' }: { className?: string }) {
       <button
         type="button"
         onClick={() => setIsOpen(!isOpen)}
-        className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-850 hover:bg-slate-800 border border-slate-700/80 text-slate-200 hover:text-white text-xs font-medium transition-colors cursor-pointer"
+        className="flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-200 hover:text-white text-xs sm:text-sm font-semibold transition-colors cursor-pointer"
         title="Alterar Idioma / Change Language"
       >
-        <Globe className="w-3.5 h-3.5 text-papo-coral" />
-        <span className="font-semibold">{locale === 'pt-BR' ? 'PT-BR' : 'EN'}</span>
+        <Globe className="w-4 h-4 text-papo-coral" />
+        <span className="font-bold">{locale === 'pt-BR' ? 'PT-BR' : 'EN'}</span>
       </button>
 
       {isOpen && (
@@ -33,8 +33,8 @@ export function LanguageSwitcher({ className = '' }: { className?: string }) {
             className="fixed inset-0 z-40"
             onClick={() => setIsOpen(false)}
           />
-          <div className="absolute right-0 mt-2 w-48 py-1.5 rounded-xl bg-slate-900 border border-slate-700 shadow-2xl z-50 animate-fadeIn text-left">
-            <div className="px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-400 border-b border-slate-800 mb-1">
+          <div className="absolute right-0 mt-2 w-52 py-2 rounded-xl bg-slate-900 border border-slate-700 shadow-2xl z-50 animate-fadeIn text-left">
+            <div className="px-3.5 py-1 text-xs font-bold uppercase tracking-wider text-slate-400 border-b border-slate-800 mb-1">
               Idioma / Language
             </div>
             {languages.map((lang) => (
@@ -45,17 +45,17 @@ export function LanguageSwitcher({ className = '' }: { className?: string }) {
                   setIsOpen(false);
                 }}
                 className={cn(
-                  'w-full flex items-center justify-between px-3 py-2 text-xs transition-colors cursor-pointer',
+                  'w-full flex items-center justify-between px-3.5 py-2.5 text-sm transition-colors cursor-pointer',
                   locale === lang.code
                     ? 'bg-slate-800 text-papo-coral font-bold'
-                    : 'text-slate-300 hover:bg-slate-800/60 hover:text-white'
+                    : 'text-slate-200 hover:bg-slate-800/60 hover:text-white'
                 )}
               >
-                <div className="flex items-center gap-2">
-                  <span className="text-sm">{lang.flag}</span>
+                <div className="flex items-center gap-2.5">
+                  <span className="text-base">{lang.flag}</span>
                   <span>{lang.label}</span>
                 </div>
-                {locale === lang.code && <Check className="w-3.5 h-3.5 text-papo-coral" />}
+                {locale === lang.code && <Check className="w-4 h-4 text-papo-coral" />}
               </button>
             ))}
           </div>

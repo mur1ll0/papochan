@@ -41,7 +41,7 @@ export interface ControlBarProps {
   onToggleScreenShare: (includeAudio?: boolean, frameRate?: number) => void | Promise<any>;
   onToggleScreenAudio?: () => void;
   onToggleChat: () => void;
-  onOpenSecurity: () => void;
+  onOpenSecurity?: () => void;
   onLeaveCall: () => void;
   onSwitchDevice: (kind: 'audio' | 'video' | 'output', deviceId: string) => void;
   onSetNoiseSuppressionMode?: (mode: NoiseSuppressionMode) => void;
@@ -160,19 +160,6 @@ export function ControlBar({
           )}
         </div>
 
-        {/* Divider */}
-        <div className="w-px h-6 bg-slate-800 mx-1" />
-
-        {/* E2EE Security Inspector */}
-        <button
-          onClick={onOpenSecurity}
-          className="flex items-center gap-1.5 px-3 h-11 rounded-xl bg-slate-800 hover:bg-slate-700 border border-stealth-emerald/40 text-stealth-emerald transition-all cursor-pointer"
-          title={t('call.control.security')}
-        >
-          <ShieldCheck className="w-5 h-5" />
-          <span className="text-xs font-bold hidden md:inline">{t('call.control.security')}</span>
-        </button>
-
         {/* Audio, Video & Language Settings */}
         <div className="relative">
           <button
@@ -186,25 +173,25 @@ export function ControlBar({
           {/* Settings Popover */}
           {showSettings && (
             <div className="absolute bottom-14 left-1/2 -translate-x-1/2 w-80 p-4 rounded-2xl bg-slate-900 border border-slate-700 shadow-2xl text-left z-50 animate-fadeIn">
-              <h4 className="text-xs font-bold text-slate-200 uppercase tracking-wider mb-3 flex items-center gap-1.5">
-                <Settings className="w-3.5 h-3.5 text-papo-coral" />
+              <h4 className="text-sm font-bold text-slate-100 flex items-center gap-2 mb-3 pb-2 border-b border-slate-800">
+                <Settings className="w-4 h-4 text-papo-coral" />
                 <span>{t('settings.title')}</span>
               </h4>
 
               {/* Language Selector inside Settings */}
-              <div className="mb-3 p-2.5 rounded-xl bg-slate-950 border border-slate-800 space-y-1.5">
-                <label className="block text-[11px] font-semibold text-slate-300 flex items-center gap-1">
-                  <Globe className="w-3 h-3 text-papo-coral" />
+              <div className="mb-3.5 p-3 rounded-xl bg-slate-950 border border-slate-800 space-y-2">
+                <label className="block text-xs font-bold text-slate-200 flex items-center gap-1.5">
+                  <Globe className="w-3.5 h-3.5 text-papo-coral" />
                   <span>{t('settings.language')}</span>
                 </label>
-                <div className="grid grid-cols-2 gap-1.5">
+                <div className="grid grid-cols-2 gap-2">
                   <button
                     type="button"
                     onClick={() => setLocale('pt-BR')}
                     className={cn(
-                      'py-1.5 px-2 rounded-lg text-xs font-semibold border transition-all cursor-pointer',
+                      'py-2 px-2.5 rounded-lg text-xs font-bold border transition-all cursor-pointer',
                       locale === 'pt-BR'
-                        ? 'bg-papo-coral text-white border-papo-coral'
+                        ? 'bg-papo-coral text-white border-papo-coral shadow-sm'
                         : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'
                     )}
                   >
@@ -214,9 +201,9 @@ export function ControlBar({
                     type="button"
                     onClick={() => setLocale('en')}
                     className={cn(
-                      'py-1.5 px-2 rounded-lg text-xs font-semibold border transition-all cursor-pointer',
+                      'py-2 px-2.5 rounded-lg text-xs font-bold border transition-all cursor-pointer',
                       locale === 'en'
-                        ? 'bg-papo-coral text-white border-papo-coral'
+                        ? 'bg-papo-coral text-white border-papo-coral shadow-sm'
                         : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'
                     )}
                   >
@@ -226,20 +213,20 @@ export function ControlBar({
               </div>
 
               {/* AI Noise Suppression Mode Toggle */}
-              <div className="mb-3 p-2.5 rounded-xl bg-slate-950 border border-slate-800 space-y-1.5">
-                <label className="block text-[11px] font-semibold text-slate-300 flex items-center gap-1">
-                  <Sparkles className="w-3 h-3 text-chan-turquoise" />
+              <div className="mb-3.5 p-3 rounded-xl bg-slate-950 border border-slate-800 space-y-2">
+                <label className="block text-xs font-bold text-slate-200 flex items-center gap-1.5">
+                  <Sparkles className="w-3.5 h-3.5 text-chan-turquoise" />
                   <span>{t('settings.noiseSuppression')}</span>
                 </label>
 
-                <div className="grid grid-cols-3 gap-1">
+                <div className="grid grid-cols-3 gap-1.5">
                   <button
                     type="button"
                     onClick={() => onSetNoiseSuppressionMode?.('off')}
                     className={cn(
-                      'py-1 px-1.5 rounded-lg text-[11px] font-medium border transition-all cursor-pointer text-center',
+                      'py-1.5 px-2 rounded-lg text-xs font-bold border transition-all cursor-pointer text-center',
                       noiseSuppressionMode === 'off'
-                        ? 'bg-slate-800 border-slate-500 text-white font-bold'
+                        ? 'bg-slate-800 border-slate-400 text-white font-black shadow-sm'
                         : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200'
                     )}
                   >
@@ -249,9 +236,9 @@ export function ControlBar({
                     type="button"
                     onClick={() => onSetNoiseSuppressionMode?.('standard')}
                     className={cn(
-                      'py-1 px-1.5 rounded-lg text-[11px] font-medium border transition-all cursor-pointer text-center',
+                      'py-1.5 px-2 rounded-lg text-xs font-bold border transition-all cursor-pointer text-center',
                       noiseSuppressionMode === 'standard'
-                        ? 'bg-chan-turquoise/20 border-chan-turquoise text-chan-turquoise font-bold'
+                        ? 'bg-chan-turquoise/20 border-chan-turquoise text-chan-turquoise font-black shadow-sm'
                         : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200'
                     )}
                   >
@@ -261,9 +248,9 @@ export function ControlBar({
                     type="button"
                     onClick={() => onSetNoiseSuppressionMode?.('ai-neural')}
                     className={cn(
-                      'py-1 px-1.5 rounded-lg text-[11px] font-medium border transition-all cursor-pointer text-center',
+                      'py-1.5 px-2 rounded-lg text-xs font-bold border transition-all cursor-pointer text-center',
                       noiseSuppressionMode === 'ai-neural'
-                        ? 'bg-stealth-emerald/20 border-stealth-emerald text-stealth-emerald font-bold'
+                        ? 'bg-stealth-emerald/20 border-stealth-emerald text-stealth-emerald font-black shadow-sm'
                         : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200'
                     )}
                   >
@@ -273,38 +260,38 @@ export function ControlBar({
               </div>
 
               {/* Microphone Select */}
-              <div className="mb-2.5">
-                <label className="block text-[11px] font-medium text-slate-400 mb-1 flex items-center gap-1">
-                  <Mic className="w-3 h-3 text-stealth-emerald" />
+              <div className="mb-3">
+                <label className="block text-xs font-bold text-slate-300 mb-1.5 flex items-center gap-1.5">
+                  <Mic className="w-3.5 h-3.5 text-stealth-emerald" />
                   <span>{t('settings.mic')}</span>
                 </label>
                 <select
                   value={selectedAudioDevice}
                   onChange={(e) => onSwitchDevice('audio', e.target.value)}
-                  className="w-full text-xs bg-slate-950 border border-slate-800 rounded-lg p-2 text-slate-200 focus:outline-none focus:border-papo-coral truncate"
+                  className="w-full text-sm bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:border-papo-coral truncate font-medium"
                 >
                   {devices.audioInputs.map((d, idx) => (
                     <option key={d.deviceId || idx} value={d.deviceId}>
-                      {d.label || `Microphone ${idx + 1}`}
+                      {d.label || `${t('settings.mic')} ${idx + 1}`}
                     </option>
                   ))}
                 </select>
               </div>
 
               {/* Camera Select */}
-              <div className="mb-2.5">
-                <label className="block text-[11px] font-medium text-slate-400 mb-1 flex items-center gap-1">
-                  <Video className="w-3 h-3 text-chan-turquoise" />
+              <div className="mb-3">
+                <label className="block text-xs font-bold text-slate-300 mb-1.5 flex items-center gap-1.5">
+                  <Video className="w-3.5 h-3.5 text-chan-turquoise" />
                   <span>{t('settings.cam')}</span>
                 </label>
                 <select
                   value={selectedVideoDevice}
                   onChange={(e) => onSwitchDevice('video', e.target.value)}
-                  className="w-full text-xs bg-slate-950 border border-slate-800 rounded-lg p-2 text-slate-200 focus:outline-none focus:border-papo-coral truncate"
+                  className="w-full text-sm bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:border-papo-coral truncate font-medium"
                 >
                   {devices.videoInputs.map((d, idx) => (
                     <option key={d.deviceId || idx} value={d.deviceId}>
-                      {d.label || `Camera ${idx + 1}`}
+                      {d.label || `${t('settings.cam')} ${idx + 1}`}
                     </option>
                   ))}
                 </select>
@@ -312,14 +299,14 @@ export function ControlBar({
 
               {/* Speaker Output Select */}
               <div>
-                <label className="block text-[11px] font-medium text-slate-400 mb-1 flex items-center gap-1">
-                  <Volume2 className="w-3 h-3 text-chan-turquoise" />
+                <label className="block text-xs font-bold text-slate-300 mb-1.5 flex items-center gap-1.5">
+                  <Volume2 className="w-3.5 h-3.5 text-chan-turquoise" />
                   <span>{t('settings.output')}</span>
                 </label>
                 <select
                   value={selectedAudioOutput}
                   onChange={(e) => onSwitchDevice('output', e.target.value)}
-                  className="w-full text-xs bg-slate-950 border border-slate-800 rounded-lg p-2 text-slate-200 focus:outline-none focus:border-papo-coral truncate"
+                  className="w-full text-sm bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-slate-200 focus:outline-none focus:border-papo-coral truncate font-medium"
                 >
                   {devices.audioOutputs.length > 0 ? (
                     devices.audioOutputs.map((d, idx) => (
@@ -328,7 +315,7 @@ export function ControlBar({
                       </option>
                     ))
                   ) : (
-                    <option value="">Default System Output</option>
+                    <option value="">{t('lobby.speaker.default')}</option>
                   )}
                 </select>
               </div>
