@@ -1,0 +1,314 @@
+import * as Ably from 'ably';
+import {
+  SignalingClient,
+  SignalingEvents,
+  DeviceMetadata,
+  SignalEnvelope,
+  SignalMessageType,
+} from './SignalingClient';
+import { signPayload, verifySignature } from '../crypto/keygen';
+import { getApiEndpoint } from '@/lib/api';
+
+export class AblySignaler extends SignalingClient {
+  private client: Ably.Realtime | null = null;
+  private channel: Ably.RealtimeChannel | null = null;
+  private roomCode: string = '';
+  private localMeta: DeviceMetadata | null = null;
+  private secretKeyEd: Uint8Array | null = null;
+  private events: Partial<SignalingEvents> = {};
+  private knownPeers = new Map<string, DeviceMetadata>();
+
+  constructor(private apiKeyOrTokenUrl?: string) {
+    super();
+  }
+
+  public setEventListeners(events: Partial<SignalingEvents>): void {
+    this.events = { ...this.events, ...events };
+  }
+
+  public async connect(
+    roomCode: string,
+    localMeta: DeviceMetadata,
+    secretKeyEd: Uint8Array
+  ): Promise<void> {
+    this.roomCode = roomCode;
+    this.localMeta = localMeta;
+    this.secretKeyEd = secretKeyEd;
+
+    const clientId = `${localMeta.userId}:${localMeta.deviceId}`;
+
+    this.events.onConnectionStateChange?.('connecting');
+
+    try {
+      // Configure Ably Realtime Client
+      const clientOptions: Ably.ClientOptions = {
+        clientId,
+        closeOnUnload: true,
+      };
+
+      const isUrl =
+        this.apiKeyOrTokenUrl?.startsWith('http://') ||
+        this.apiKeyOrTokenUrl?.startsWith('https://') ||
+        this.apiKeyOrTokenUrl?.startsWith('/');
+
+      if (this.apiKeyOrTokenUrl && !isUrl && this.apiKeyOrTokenUrl.includes(':') && !this.apiKeyOrTokenUrl.includes('/')) {
+        // Direct Ably API Key (format: "appId.keyId:secret")
+        clientOptions.key = this.apiKeyOrTokenUrl;
+      } else {
+        // Token authentication endpoint
+        clientOptions.authUrl = this.apiKeyOrTokenUrl || getApiEndpoint('/api/signaling-token');
+        clientOptions.authParams = {
+          clientId,
+          roomCode,
+          deviceId: localMeta.deviceId,
+          userId: localMeta.userId,
+          username: localMeta.username,
+        };
+      }
+
+      this.client = new Ably.Realtime(clientOptions);
+
+      this.client.connection.on('connected', () => {
+        this.events.onConnectionStateChange?.('connected');
+      });
+
+      this.client.connection.on('disconnected', () => {
+        this.events.onConnectionStateChange?.('disconnected');
+      });
+
+      this.client.connection.on('failed', (stateChange) => {
+        this.events.onConnectionStateChange?.('failed');
+        this.events.onError?.(new Error(`Ably connection failed: ${stateChange.reason?.message}`));
+      });
+
+      // Join room signaling channel
+      const channelName = `ghost:room:${roomCode}`;
+      this.channel = this.client.channels.get(channelName, {
+        params: { rewind: '10s' },
+      });
+
+      // Subscribe to signal messages
+      await this.channel.subscribe('signal', (message: Ably.Message) => {
+        this.handleIncomingSignal(message.data as SignalEnvelope);
+      });
+
+      // Subscribe to Ably Presence events for presence synchronization
+      await this.channel.presence.subscribe('enter', (presenceMsg: Ably.PresenceMessage) => {
+        this.handlePresenceEnter(presenceMsg);
+      });
+
+      await this.channel.presence.subscribe('update', (presenceMsg: Ably.PresenceMessage) => {
+        this.handlePresenceUpdate(presenceMsg);
+      });
+
+      await this.channel.presence.subscribe('leave', (presenceMsg: Ably.PresenceMessage) => {
+        this.handlePresenceLeave(presenceMsg);
+      });
+
+      // Announce local presence with device capabilities & public keys
+      await this.channel.presence.enter(this.localMeta);
+
+      // Query existing peers in presence set
+      const members = await this.channel.presence.get();
+      members.forEach((member) => {
+        if (member.clientId !== clientId && member.data) {
+          const peerMeta = member.data as DeviceMetadata;
+          this.knownPeers.set(member.clientId, peerMeta);
+          this.events.onPeerJoined?.(peerMeta);
+        }
+      });
+
+      // Broadcast an explicit presence announce signal for immediate mesh convergence
+      await this.publishEnvelope('presence-announce', this.localMeta);
+    } catch (err: any) {
+      this.events.onError?.(err);
+      this.events.onConnectionStateChange?.('failed');
+      throw err;
+    }
+  }
+
+  public async disconnect(): Promise<void> {
+    try {
+      if (this.channel) {
+        // Attempt fast best-effort leave signal
+        await Promise.race([
+          Promise.all([
+            this.publishEnvelope('leave', { deviceId: this.localMeta?.deviceId }),
+            this.channel.presence.leave(),
+          ]),
+          new Promise((r) => setTimeout(r, 200)),
+        ]).catch(() => {});
+
+        try {
+          this.channel.unsubscribe();
+        } catch {
+          // ignore
+        }
+      }
+      if (this.client) {
+        this.client.close();
+      }
+    } catch (err) {
+      console.warn('[AblySignaler] Error during disconnect:', err);
+    } finally {
+      this.channel = null;
+      this.client = null;
+      this.knownPeers.clear();
+      this.events.onConnectionStateChange?.('disconnected');
+    }
+  }
+
+  public async sendOffer(targetId: string, sdp: RTCSessionDescriptionInit): Promise<void> {
+    await this.publishEnvelope('offer', { sdp, meta: this.localMeta }, targetId);
+  }
+
+  public async sendAnswer(targetId: string, sdp: RTCSessionDescriptionInit): Promise<void> {
+    await this.publishEnvelope('answer', { sdp }, targetId);
+  }
+
+  public async sendCandidate(targetId: string, candidate: RTCIceCandidateInit): Promise<void> {
+    await this.publishEnvelope('ice-candidate', { candidate }, targetId);
+  }
+
+  public async sendRenegotiate(targetId: string): Promise<void> {
+    await this.publishEnvelope('renegotiate', {}, targetId);
+  }
+
+  public async sendStateUpdate(capabilities: DeviceMetadata['capabilities']): Promise<void> {
+    if (this.localMeta) {
+      this.localMeta.capabilities = capabilities;
+      if (this.channel) {
+        await this.channel.presence.update(this.localMeta);
+      }
+      await this.publishEnvelope('device-state-update', capabilities);
+    }
+  }
+
+  private async publishEnvelope<T>(
+    type: SignalMessageType,
+    payload: T,
+    targetId?: string
+  ): Promise<void> {
+    if (!this.channel || !this.localMeta || !this.secretKeyEd) {
+      return;
+    }
+
+    const senderId = `${this.localMeta.userId}:${this.localMeta.deviceId}`;
+    const timestamp = Date.now();
+
+    // Data string for digital signature verification
+    const signaturePayload = `${type}|${senderId}|${targetId || '*'}|${this.roomCode}|${timestamp}|${JSON.stringify(payload)}`;
+    const signature = signPayload(signaturePayload, this.secretKeyEd);
+
+    const envelope: SignalEnvelope<T> = {
+      type,
+      senderId,
+      targetId,
+      roomCode: this.roomCode,
+      payload,
+      timestamp,
+      publicKeyEd: this.localMeta.publicKeyEd,
+      signature,
+    };
+
+    await this.channel.publish('signal', envelope);
+  }
+
+  private handleIncomingSignal(envelope: SignalEnvelope): void {
+    if (!this.localMeta) return;
+
+    const myClientId = `${this.localMeta.userId}:${this.localMeta.deviceId}`;
+
+    // Discard signals emitted by self
+    if (envelope.senderId === myClientId) return;
+
+    // Discard targeted signals not intended for this device
+    if (envelope.targetId && envelope.targetId !== myClientId) return;
+
+    // Verify digital signature to ensure zero MITM and authenticity
+    const verificationString = `${envelope.type}|${envelope.senderId}|${envelope.targetId || '*'}|${envelope.roomCode}|${envelope.timestamp}|${JSON.stringify(envelope.payload)}`;
+    const isValid = verifySignature(
+      verificationString,
+      envelope.signature,
+      envelope.publicKeyEd
+    );
+
+    if (!isValid) {
+      console.error('[AblySignaler] Discarding forged/invalid signal envelope from:', envelope.senderId);
+      return;
+    }
+
+    switch (envelope.type) {
+      case 'presence-announce': {
+        const peerMeta = envelope.payload as DeviceMetadata;
+        this.knownPeers.set(envelope.senderId, peerMeta);
+        this.events.onPeerJoined?.(peerMeta);
+        break;
+      }
+      case 'offer': {
+        const { sdp, meta } = envelope.payload as {
+          sdp: RTCSessionDescriptionInit;
+          meta: DeviceMetadata;
+        };
+        if (meta) {
+          this.knownPeers.set(envelope.senderId, meta);
+        }
+        this.events.onOffer?.(envelope.senderId, sdp, meta || this.knownPeers.get(envelope.senderId));
+        break;
+      }
+      case 'answer': {
+        const { sdp } = envelope.payload as { sdp: RTCSessionDescriptionInit };
+        this.events.onAnswer?.(envelope.senderId, sdp);
+        break;
+      }
+      case 'ice-candidate': {
+        const { candidate } = envelope.payload as { candidate: RTCIceCandidateInit };
+        this.events.onCandidate?.(envelope.senderId, candidate);
+        break;
+      }
+      case 'renegotiate': {
+        this.events.onRenegotiate?.(envelope.senderId);
+        break;
+      }
+      case 'device-state-update': {
+        const capabilities = envelope.payload as DeviceMetadata['capabilities'];
+        const existing = this.knownPeers.get(envelope.senderId);
+        if (existing) {
+          existing.capabilities = capabilities;
+        }
+        this.events.onDeviceStateUpdate?.(envelope.senderId, capabilities);
+        break;
+      }
+      case 'leave': {
+        this.knownPeers.delete(envelope.senderId);
+        this.events.onPeerLeft?.(envelope.senderId);
+        break;
+      }
+    }
+  }
+
+  private handlePresenceEnter(msg: Ably.PresenceMessage): void {
+    if (!this.localMeta) return;
+    const myClientId = `${this.localMeta.userId}:${this.localMeta.deviceId}`;
+    if (msg.clientId === myClientId) return;
+
+    if (msg.data) {
+      const peerMeta = msg.data as DeviceMetadata;
+      this.knownPeers.set(msg.clientId, peerMeta);
+      this.events.onPeerJoined?.(peerMeta);
+    }
+  }
+
+  private handlePresenceUpdate(msg: Ably.PresenceMessage): void {
+    if (msg.data) {
+      const peerMeta = msg.data as DeviceMetadata;
+      this.knownPeers.set(msg.clientId, peerMeta);
+      this.events.onDeviceStateUpdate?.(msg.clientId, peerMeta.capabilities);
+    }
+  }
+
+  private handlePresenceLeave(msg: Ably.PresenceMessage): void {
+    this.knownPeers.delete(msg.clientId);
+    this.events.onPeerLeft?.(msg.clientId);
+  }
+}

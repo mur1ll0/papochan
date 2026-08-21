@@ -1,0 +1,50 @@
+datasource db {
+  provider  = "postgresql"
+  url       = env("POSTGRES_PRISMA_URL")
+  directUrl = env("POSTGRES_URL_NON_POOLING")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id          String       @id @default(uuid())
+  username    String       @unique
+  displayName String
+  createdAt   DateTime     @default(now())
+  devices     Device[]
+  rooms       RoomMember[]
+}
+
+model Device {
+  id          String   @id @default(uuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  deviceName  String   // Ex: "MacBook Pro", "iPhone 15", "Linux Workstation"
+  deviceType  String   // "desktop" | "mobile" | "browser"
+  publicKeyEd String   // Chave pública Ed25519 (Assinatura)
+  publicKeyDh String   // Chave pública X25519 (Diffie-Hellman)
+  lastSeen    DateTime @updatedAt
+  createdAt   DateTime @default(now())
+
+  @@index([userId])
+}
+
+model Room {
+  id        String       @id @default(uuid())
+  roomCode  String       @unique
+  createdAt DateTime     @default(now())
+  members   RoomMember[]
+}
+
+model RoomMember {
+  id       String   @id @default(uuid())
+  roomId   String
+  room     Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  userId   String
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  joinedAt DateTime @default(now())
+
+  @@unique([roomId, userId])
+}
