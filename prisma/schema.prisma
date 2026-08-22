@@ -48,3 +48,18 @@ model RoomMember {
 
   @@unique([roomId, userId])
 }
+
+model AppRelease {
+  id            String   @id @default(uuid())
+  platform      String   @unique // "windows" | "android" | "ios" | "macos" | "linux"
+  minVersion    String   @default("1.0.0")
+  latestVersion String   @default("1.0.0")
+  downloadUrl   String   // Link para download do instalador / APK / DMG
+  releaseNotes  String?  // Notas da versão
+  isMandatory   Boolean  @default(false) // Se a atualização é obrigatória
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([platform])
+}
+

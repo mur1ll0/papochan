@@ -1,0 +1,310 @@
+name: Multiplatform Release Pipeline (Automated Major Version Bump)
+
+on:
+  push:
+    branches:
+      - main
+      - master
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      force_release:
+        description: 'Forçar compilação e criação de release mesmo sem alteração de Major version'
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  # ============================================================
+  # 0. DETECT MAJOR VERSION BUMP & AUTO-CREATE TAG
+  # ============================================================
+  detect-major-bump:
+    name: Check Version & Major Bump
+    runs-on: ubuntu-latest
+    outputs:
+      should_release: ${{ steps.check.outputs.should_release }}
+      release_version: ${{ steps.check.outputs.release_version }}
+    steps:
+      - name: Checkout repository with full git history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Evaluate Version Changes
+        id: check
+        run: |
+          node -e "
+            const fs = require('fs');
+            const { execSync } = require('child_process');
+
+            const isTag = '${{ github.ref }}'.startsWith('refs/tags/v');
+            const forceRelease = '${{ github.event.inputs.force_release }}' === 'true';
+
+            const currPkg = JSON.parse(fs.readFileSync('package.json', 'utf-8'));
+            const currentVersion = currPkg.version;
+            const currMajor = parseInt(currentVersion.split('.')[0], 10) || 0;
+
+            if (isTag) {
+              const tagVersion = '${{ github.ref_name }}';
+              console.log('✔ Direct Tag push detected:', tagVersion);
+              fs.appendFileSync(process.env.GITHUB_OUTPUT, 'should_release=true\n');
+              fs.appendFileSync(process.env.GITHUB_OUTPUT, 'release_version=' + tagVersion + '\n');
+              process.exit(0);
+            }
+
+            if (forceRelease) {
+              console.log('✔ Manual Force Release triggered for version: v' + currentVersion);
+              fs.appendFileSync(process.env.GITHUB_OUTPUT, 'should_release=true\n');
+              fs.appendFileSync(process.env.GITHUB_OUTPUT, 'release_version=v' + currentVersion + '\n');
+              process.exit(0);
+            }
+
+            // Retrieve previous version from Git HEAD~1 or latest Git Tag
+            let prevVersion = '0.0.0';
+            try {
+              const prevPkgContent = execSync('git show HEAD~1:package.json', { stdio: ['pipe', 'pipe', 'ignore'] }).toString();
+              prevVersion = JSON.parse(prevPkgContent).version;
+            } catch (e) {
+              try {
+                const latestTag = execSync('git describe --tags --abbrev=0', { stdio: ['pipe', 'pipe', 'ignore'] }).toString().trim().replace(/^v/, '');
+                if (latestTag) prevVersion = latestTag;
+              } catch {}
+            }
+
+            const prevMajor = parseInt(prevVersion.split('.')[0], 10) || 0;
+
+            console.log('--------------------------------------------------');
+            console.log('Previous Version in Git:', prevVersion, '(Major:', prevMajor + ')');
+            console.log('Current Version in package.json:', currentVersion, '(Major:', currMajor + ')');
+            console.log('--------------------------------------------------');
+
+            const isMajorBump = currMajor > prevMajor;
+
+            if (isMajorBump) {
+              console.log('🎉 MAJOR VERSION BUMP DETECTED! (' + prevVersion + ' -> ' + currentVersion + ')');
+              console.log('Triggering automated multiplatform native binary build...');
+              fs.appendFileSync(process.env.GITHUB_OUTPUT, 'should_release=true\n');
+              fs.appendFileSync(process.env.GITHUB_OUTPUT, 'release_version=v' + currentVersion + '\n');
+            } else {
+              console.log('ℹ Version updated (' + prevVersion + ' -> ' + currentVersion + ') is a Minor/Patch or unchanged.');
+              console.log('Native binary build skipped. (Clients will receive web updates instantly).');
+              fs.appendFileSync(process.env.GITHUB_OUTPUT, 'should_release=false\n');
+              fs.appendFileSync(process.env.GITHUB_OUTPUT, 'release_version=v' + currentVersion + '\n');
+            }
+          "
+
+      - name: Create and Push Git Tag (if major bump on main)
+        if: steps.check.outputs.should_release == 'true' && !startsWith(github.ref, 'refs/tags/v')
+        run: |
+          TAG_NAME="${{ steps.check.outputs.release_version }}"
+          echo "Creating Git Tag: $TAG_NAME"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG_NAME" -m "Automated Major Release $TAG_NAME" || true
+          git push origin "$TAG_NAME" || true
+
+  # ============================================================
+  # 1. WINDOWS DESKTOP BUILD (Tauri .exe / .msi)
+  # ============================================================
+  build-windows:
+    name: Build Windows Desktop
+    needs: [detect-major-bump]
+    if: needs.detect-major-bump.outputs.should_release == 'true'
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma Client
+        run: npx prisma generate
+
+      - name: Sync Tauri Config Version
+        shell: pwsh
+        run: |
+          node -e "const pkg=require('./package.json'); const tauri=require('./src-tauri/tauri.conf.json'); tauri.version=pkg.version; require('fs').writeFileSync('./src-tauri/tauri.conf.json', JSON.stringify(tauri, null, 2));"
+
+      - name: Build Web Application
+        run: npm run build:web
+        env:
+          NEXT_PUBLIC_APP_URL: ${{ secrets.NEXT_PUBLIC_APP_URL || 'https://papochan.app' }}
+
+      - name: Build Tauri Windows Executable
+        run: npx tauri build
+
+      - name: Prepare Windows Artifacts
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist-artifacts
+          Get-ChildItem -Path "src-tauri/target/release/bundle/nsis/*.exe" -Recurse | Copy-Item -Destination "dist-artifacts/papochan-setup.exe"
+          Get-ChildItem -Path "src-tauri/target/release/bundle/msi/*.msi" -Recurse | Copy-Item -Destination "dist-artifacts/papochan.msi"
+
+      - name: Upload Windows Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-binaries
+          path: dist-artifacts/*
+
+  # ============================================================
+  # 2. ANDROID MOBILE BUILD (Capacitor .apk)
+  # ============================================================
+  build-android:
+    name: Build Android APK
+    needs: [detect-major-bump]
+    if: needs.detect-major-bump.outputs.should_release == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: 17
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma Client
+        run: npx prisma generate
+
+      - name: Build Web Application
+        run: npm run build:web
+        env:
+          NEXT_PUBLIC_APP_URL: ${{ secrets.NEXT_PUBLIC_APP_URL || 'https://papochan.app' }}
+
+      - name: Initialize & Sync Android
+        run: |
+          npx cap add android || true
+          npx cap sync android
+
+      - name: Build Android APK
+        working-directory: ./android
+        run: |
+          chmod +x ./gradlew
+          ./gradlew assembleRelease || ./gradlew assembleDebug
+
+      - name: Prepare Android Artifacts
+        run: |
+          mkdir -p dist-artifacts
+          find android/app/build/outputs/apk -name "*.apk" -exec cp {} dist-artifacts/papochan.apk \;
+
+      - name: Upload Android Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-binaries
+          path: dist-artifacts/*
+
+  # ============================================================
+  # 3. macOS DESKTOP BUILD (Tauri .dmg)
+  # ============================================================
+  build-macos:
+    name: Build macOS Desktop
+    needs: [detect-major-bump]
+    if: needs.detect-major-bump.outputs.should_release == 'true'
+    runs-on: macos-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma Client
+        run: npx prisma generate
+
+      - name: Sync Tauri Config Version
+        run: |
+          node -e "const pkg=require('./package.json'); const tauri=require('./src-tauri/tauri.conf.json'); tauri.version=pkg.version; require('fs').writeFileSync('./src-tauri/tauri.conf.json', JSON.stringify(tauri, null, 2));"
+
+      - name: Build Web Application
+        run: npm run build:web
+        env:
+          NEXT_PUBLIC_APP_URL: ${{ secrets.NEXT_PUBLIC_APP_URL || 'https://papochan.app' }}
+
+      - name: Build Tauri macOS DMG
+        run: npx tauri build
+
+      - name: Prepare macOS Artifacts
+        run: |
+          mkdir -p dist-artifacts
+          find src-tauri/target/release/bundle/dmg -name "*.dmg" -exec cp {} dist-artifacts/papochan.dmg \;
+
+      - name: Upload macOS Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-binaries
+          path: dist-artifacts/*
+
+  # ============================================================
+  # 4. PUBLISH ALL TO GITHUB RELEASES
+  # ============================================================
+  publish-release:
+    name: Publish to GitHub Releases
+    needs: [detect-major-bump, build-windows, build-android, build-macos]
+    if: needs.detect-major-bump.outputs.should_release == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download all built binaries
+        uses: actions/download-artifact@v4
+        with:
+          path: all-binaries
+
+      - name: Organize Release Files
+        run: |
+          mkdir -p release-files
+          cp all-binaries/windows-binaries/* release-files/ || true
+          cp all-binaries/android-binaries/* release-files/ || true
+          cp all-binaries/macos-binaries/* release-files/ || true
+          ls -la release-files
+
+      - name: Create or Update GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-files/*
+          name: PapoChan ${{ needs.detect-major-bump.outputs.release_version }}
+          tag_name: ${{ needs.detect-major-bump.outputs.release_version }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true

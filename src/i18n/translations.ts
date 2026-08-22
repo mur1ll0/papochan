@@ -156,6 +156,43 @@ export const translations = {
     'room.header.copied': 'Copiado!',
     'room.header.sisterDevice': 'Dispositivo Irmão Conectado',
 
+    // Navigation & Downloads
+    'nav.downloadApp': 'Baixar App',
+    'nav.downloadFor': 'Baixar para',
+    'download.modal.title': 'Baixar Aplicativo PapoChan',
+    'download.modal.subtitle': 'Instale em seu dispositivo para melhor desempenho, compartilhamento 60 FPS e chamadas instantâneas.',
+    'download.modal.detected': 'Seu Sistema:',
+    'download.btn.downloadDirect': 'Baixar Instalador',
+    'download.guide.title': 'Como instalar e permitir a execução:',
+    'download.guide.smartscreen.title': 'Instalação no Windows (SmartScreen)',
+    'download.guide.smartscreen.step1': '1. Baixe o instalador (.exe) e execute o arquivo baixado.',
+    'download.guide.smartscreen.step2': '2. Se o Windows exibir a tela azul "O Windows protegeu o seu computador", clique no link sublinhado "Mais informações".',
+    'download.guide.smartscreen.step3': '3. Clique no botão "Executar assim mesmo" para concluir a instalação com segurança.',
+    'download.guide.playprotect.title': 'Instalação no Android (APK Direto)',
+    'download.guide.playprotect.step1': '1. Baixe o arquivo APK diretamente em seu smartphone ou tablet.',
+    'download.guide.playprotect.step2': '2. Ao tocar no arquivo baixado, se o Android solicitar, toque em "Configurações" e ative a chave "Permitir desta fonte".',
+    'download.guide.playprotect.step3': '3. Se o Google Play Protect exibir uma tela de alerta, toque em "Instalar assim mesmo".',
+    'download.guide.ios.title': 'Instalação no iPhone e iPad (iOS)',
+    'download.guide.ios.pwa.step1': '1. Abra este site diretamente no navegador Safari do seu iPhone ou iPad.',
+    'download.guide.ios.pwa.step2': '2. Toque no botão de Compartilhar (o ícone do quadrado com seta para cima na barra inferior do Safari).',
+    'download.guide.ios.pwa.step3': '3. Role o menu para baixo e selecione a opção "Adicionar à Tela de Início".',
+    'download.guide.ios.pwa.step4': '4. O PapoChan será instalado como aplicativo nativo em tela cheia com ícone na sua tela inicial!',
+    'download.guide.gatekeeper.title': 'Instalação no macOS',
+    'download.guide.gatekeeper.step1': '1. Baixe o arquivo .dmg e arraste o PapoChan para a sua pasta de Aplicativos.',
+    'download.guide.gatekeeper.step2': '2. Ao abrir pela primeira vez, se o Gatekeeper bloquear, clique com o botão direito no ícone > "Abrir", ou acerte em Ajustes do Sistema > Privacidade e Segurança > "Permitir abertura".',
+    'download.guide.linux.title': 'Instalação no Linux',
+    'download.guide.linux.step1': '1. Baixe o pacote portátil .AppImage.',
+    'download.guide.linux.step2': '2. Dê permissão de execução com o comando: chmod +x papochan.AppImage',
+    'download.guide.linux.step3': '3. Dê duplo clique no arquivo para abrir o PapoChan.',
+
+    // App Updater
+    'updater.modal.title': 'Nova Versão Disponível!',
+    'updater.modal.mandatoryTitle': 'Atualização Obrigatória Necessária',
+    'updater.modal.desc': 'Uma nova versão do aplicativo nativo ({version}) está disponível com melhorias de desempenho e novas funções.',
+    'updater.modal.mandatoryDesc': 'A versão do aplicativo instalada ({current}) não é mais compatível com os novos protocolos criptográficos. Baixe a versão {version} para continuar.',
+    'updater.modal.btnUpdate': 'Baixar e Atualizar',
+    'updater.modal.btnLater': 'Lembrar Mais Tarde',
+
     // Common
     'common.save': 'Salvar',
     'common.cancel': 'Cancelar',
@@ -318,6 +355,43 @@ export const translations = {
     'room.header.copied': 'Copied!',
     'room.header.sisterDevice': 'Sister Device Connected',
 
+    // Navigation & Downloads
+    'nav.downloadApp': 'Download App',
+    'nav.downloadFor': 'Download for',
+    'download.modal.title': 'Download PapoChan App',
+    'download.modal.subtitle': 'Install on your device for enhanced performance, 60 FPS screen sharing, and direct calling.',
+    'download.modal.detected': 'Your System:',
+    'download.btn.downloadDirect': 'Download Installer',
+    'download.guide.title': 'How to install and allow execution:',
+    'download.guide.smartscreen.title': 'Windows Installation (SmartScreen)',
+    'download.guide.smartscreen.step1': '1. Download the .exe installer and run the downloaded file.',
+    'download.guide.smartscreen.step2': '2. If Windows shows "Windows protected your PC", click the underlined "More info" link.',
+    'download.guide.smartscreen.step3': '3. Click the "Run anyway" button to complete installation safely.',
+    'download.guide.playprotect.title': 'Android Installation (Direct APK)',
+    'download.guide.playprotect.step1': '1. Download the APK file directly on your smartphone or tablet.',
+    'download.guide.playprotect.step2': '2. When tapping the APK, if prompted, tap "Settings" and enable "Allow from this source".',
+    'download.guide.playprotect.step3': '3. If Google Play Protect shows a prompt, tap "Install anyway".',
+    'download.guide.ios.title': 'iPhone & iPad Installation (iOS)',
+    'download.guide.ios.pwa.step1': '1. Open this website in Safari on your iPhone or iPad.',
+    'download.guide.ios.pwa.step2': '2. Tap the Share button (the square with arrow up icon at the bottom of Safari).',
+    'download.guide.ios.pwa.step3': '3. Scroll down the menu and choose "Add to Home Screen".',
+    'download.guide.ios.pwa.step4': '4. PapoChan will be installed as a full-screen app with a dedicated icon on your home screen!',
+    'download.guide.gatekeeper.title': 'macOS Installation',
+    'download.guide.gatekeeper.step1': '1. Download the .dmg file and drag PapoChan into your Applications folder.',
+    'download.guide.gatekeeper.step2': '2. When opening for the first time, if Gatekeeper blocks it, right-click the icon > "Open", or go to System Settings > Privacy & Security > "Open Anyway".',
+    'download.guide.linux.title': 'Linux Installation',
+    'download.guide.linux.step1': '1. Download the portable .AppImage package.',
+    'download.guide.linux.step2': '2. Grant execution permission via command: chmod +x papochan.AppImage',
+    'download.guide.linux.step3': '3. Double-click the file to launch PapoChan.',
+
+    // App Updater
+    'updater.modal.title': 'New Version Available!',
+    'updater.modal.mandatoryTitle': 'Mandatory Update Required',
+    'updater.modal.desc': 'A new version of the native app ({version}) is available with performance improvements and new features.',
+    'updater.modal.mandatoryDesc': 'Your current installed app version ({current}) is no longer supported with the latest cryptographic protocols. Please download version {version} to continue.',
+    'updater.modal.btnUpdate': 'Download and Update',
+    'updater.modal.btnLater': 'Remind Me Later',
+
     // Common
     'common.save': 'Save',
     'common.cancel': 'Cancel',
@@ -328,3 +402,4 @@ export const translations = {
 } as const;
 
 export type TranslationKey = keyof typeof translations['pt-BR'];
+

@@ -24,9 +24,12 @@ import { OutgoingCallModal } from '@/components/call/OutgoingCallModal';
 import { ChameleonLogo } from '@/components/brand/ChameleonLogo';
 import { PapoChanWordmark } from '@/components/brand/PapoChanWordmark';
 import { LanguageSwitcher } from '@/components/brand/LanguageSwitcher';
+import { DownloadButton } from '@/components/download/DownloadButton';
+import { AppUpdateModal } from '@/components/updater/AppUpdateModal';
 import { generateRoomCode } from '@/lib/utils';
 import { getApiEndpoint } from '@/lib/api';
 import { cn } from '@/lib/utils';
+
 
 export default function HomePage() {
   const router = useRouter();
@@ -91,9 +94,11 @@ export default function HomePage() {
             <span className="font-mono tracking-wide">{t('app.badge.e2ee')}</span>
           </div>
 
-          {/* Header Controls: Direct Call Badge & Language Selector */}
-          <div className="flex items-center gap-3">
-            <div className="hidden md:flex items-center gap-2 px-4 py-1.5 rounded-full bg-slate-900 border border-slate-800 text-xs sm:text-sm font-semibold text-slate-200">
+          {/* Header Controls: Download App, Direct Call Badge & Language Selector */}
+          <div className="flex items-center gap-2.5 sm:gap-3">
+            <DownloadButton />
+
+            <div className="hidden md:flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-slate-900 border border-slate-800 text-xs sm:text-sm font-semibold text-slate-200">
               <span className="w-2.5 h-2.5 rounded-full bg-chan-turquoise animate-pulse" />
               <span>{t('app.badge.directCalls')}</span>
             </div>
@@ -102,6 +107,7 @@ export default function HomePage() {
           </div>
         </div>
       </header>
+
 
       {/* Main Content Area */}
       <div className="max-w-6xl mx-auto px-4 sm:px-6 py-10 sm:py-16 w-full flex-1 flex flex-col items-center justify-center">
@@ -327,6 +333,9 @@ export default function HomePage() {
         </div>
       </div>
 
+      {/* Native App Auto-Update Check Overlay */}
+      <AppUpdateModal />
+
       {/* Real-time Ringing Overlays */}
       <IncomingCallModal
         call={directCalls.incomingCall}
@@ -338,6 +347,7 @@ export default function HomePage() {
         call={directCalls.outgoingCall}
         onCancel={directCalls.cancelOutgoingCall}
       />
+
 
       {/* Clean Modern Footer */}
       <footer className="border-t border-slate-800/80 bg-slate-950/80 py-5 px-4 text-center text-sm text-slate-400 font-medium">
