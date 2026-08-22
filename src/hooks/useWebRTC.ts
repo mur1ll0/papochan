@@ -18,6 +18,8 @@ import { SerializedIdentity } from '@/core/crypto/storage';
 import { decodeBase64 } from 'tweetnacl-util';
 import { getApiEndpoint } from '@/lib/api';
 
+export type AdmissionStatus = 'idle' | 'checking' | 'knocking' | 'approved' | 'rejected';
+
 export interface UseWebRTCOptions {
   roomCode: string;
   identity: SerializedIdentity | null;
@@ -34,6 +36,8 @@ export function useWebRTC({
   const [signalingState, setSignalingState] = useState<
     'idle' | 'connecting' | 'connected' | 'disconnected' | 'failed'
   >('idle');
+  const [admissionStatus, setAdmissionStatus] = useState<AdmissionStatus>('idle');
+  const [pendingKnocks, setPendingKnocks] = useState<Array<{ senderId: string; meta: DeviceMetadata; timestamp: number }>>([]);
   const [peers, setPeers] = useState<RemotePeerNode[]>([]);
   const [coPresenceGroups, setCoPresenceGroups] = useState<CoPresenceUser[]>([]);
   const [messages, setMessages] = useState<ChatTextMessage[]>([]);
@@ -50,6 +54,7 @@ export function useWebRTC({
 
     try {
       setSignalingState('connecting');
+      setAdmissionStatus('checking');
       setError(null);
 
       const localMeta: DeviceMetadata = {
@@ -136,17 +141,54 @@ export function useWebRTC({
         },
       });
 
+      // Signaler events for Waiting Room / Knocking
+      signaler.setEventListeners({
+        onKnock: (request) => {
+          // Auto-approve if it's a sister device belonging to the exact same user
+          if (request.meta.userId === localMeta.userId) {
+            signaler.sendKnockApproved(request.senderId);
+            return;
+          }
+          setPendingKnocks((prev) => {
+            if (prev.some((k) => k.senderId === request.senderId)) return prev;
+            return [...prev, request];
+          });
+        },
+        onKnockApproved: async () => {
+          setAdmissionStatus('approved');
+          if (meshManagerRef.current && mediaEngine) {
+            await meshManagerRef.current.syncLocalTracks();
+          }
+        },
+        onKnockRejected: () => {
+          setAdmissionStatus('rejected');
+        },
+        onKnockCancelled: (senderId) => {
+          setPendingKnocks((prev) => prev.filter((k) => k.senderId !== senderId));
+        },
+      });
+
       // Connect Signaler
       await signaler.connect(roomCode, localMeta, secretKeyEd);
       setSignalingState('connected');
 
-      // Sync local tracks
-      if (mediaEngine) {
-        await mesh.syncLocalTracks();
+      // Check if room is empty or if we need to knock
+      const existingPeersCount = signaler.getKnownPeersCount();
+      if (existingPeersCount === 0) {
+        // First participant in the room: automatically approved as Host
+        setAdmissionStatus('approved');
+        if (mediaEngine) {
+          await mesh.syncLocalTracks();
+        }
+      } else {
+        // Room has active participants: enter waiting room and knock
+        setAdmissionStatus('knocking');
+        await signaler.sendKnock();
       }
     } catch (err: any) {
       console.error('[useWebRTC] Failed to join room:', err);
       setSignalingState('failed');
+      setAdmissionStatus('rejected');
       setError(err.message || 'Failed to connect to signaling');
     }
   }, [roomCode, identity, mediaEngine]);
@@ -226,6 +268,31 @@ export function useWebRTC({
     return fileId;
   }, [identity]);
 
+  const approveKnock = useCallback(async (senderId: string) => {
+    if (signalerRef.current) {
+      await signalerRef.current.sendKnockApproved(senderId);
+      setPendingKnocks((prev) => prev.filter((k) => k.senderId !== senderId));
+    }
+  }, []);
+
+  const rejectKnock = useCallback(async (senderId: string) => {
+    if (signalerRef.current) {
+      await signalerRef.current.sendKnockRejected(senderId);
+      setPendingKnocks((prev) => prev.filter((k) => k.senderId !== senderId));
+    }
+  }, []);
+
+  const cancelKnock = useCallback(async () => {
+    try {
+      if (signalerRef.current) {
+        await signalerRef.current.sendKnockCancel();
+      }
+    } catch {
+      // ignore
+    }
+    await leave();
+  }, [leave]);
+
   const clearChatMemory = useCallback(() => {
     setMessages([]);
     setFileTransfers(new Map());
@@ -244,6 +311,8 @@ export function useWebRTC({
 
   return {
     signalingState,
+    admissionStatus,
+    pendingKnocks,
     peers,
     coPresenceGroups,
     messages,
@@ -252,6 +321,9 @@ export function useWebRTC({
     error,
     join,
     leave,
+    approveKnock,
+    rejectKnock,
+    cancelKnock,
     syncTracks,
     sendMessage,
     setTyping,

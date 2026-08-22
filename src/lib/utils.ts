@@ -21,10 +21,20 @@ export function formatTimestamp(timestamp: number): string {
 
 export function generateRoomCode(): string {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  const randomBytes = new Uint8Array(9);
+  if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
+    crypto.getRandomValues(randomBytes);
+  } else {
+    // Fallback if crypto is unavailable
+    for (let i = 0; i < 9; i++) {
+      randomBytes[i] = Math.floor(Math.random() * 256);
+    }
+  }
+
   let code = '';
   for (let i = 0; i < 9; i++) {
     if (i === 3 || i === 6) code += '-';
-    code += chars.charAt(Math.floor(Math.random() * chars.length));
+    code += chars.charAt(randomBytes[i] % chars.length);
   }
   return code;
 }

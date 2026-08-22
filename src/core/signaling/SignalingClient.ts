@@ -23,17 +23,27 @@ export type SignalMessageType =
   | 'ice-candidate'
   | 'renegotiate'
   | 'device-state-update'
-  | 'leave';
+  | 'leave'
+  | 'knock'
+  | 'knock-approved'
+  | 'knock-rejected'
+  | 'knock-cancel';
 
 export interface SignalEnvelope<T = any> {
   type: SignalMessageType;
   senderId: string; // Formatted as "userId:deviceId"
-  targetId?: string; // Optional: target "userId:deviceId" for direct 1:1 messages (offer/answer/ice)
+  targetId?: string; // Optional: target "userId:deviceId" for direct 1:1 messages (offer/answer/ice/knock-approved)
   roomCode: string;
   payload: T;
   timestamp: number;
   publicKeyEd: string;
   signature: string; // Ed25519 detached signature
+}
+
+export interface KnockRequest {
+  senderId: string;
+  meta: DeviceMetadata;
+  timestamp: number;
 }
 
 export interface SignalingEvents {
@@ -44,6 +54,10 @@ export interface SignalingEvents {
   onCandidate: (senderId: string, candidate: RTCIceCandidateInit) => void;
   onRenegotiate: (senderId: string) => void;
   onDeviceStateUpdate: (senderId: string, capabilities: DeviceMetadata['capabilities']) => void;
+  onKnock: (request: KnockRequest) => void;
+  onKnockApproved: (approverId: string) => void;
+  onKnockRejected: (rejectorId: string) => void;
+  onKnockCancelled?: (senderId: string) => void;
   onError: (error: Error) => void;
   onConnectionStateChange: (state: 'connecting' | 'connected' | 'disconnected' | 'failed') => void;
 }
@@ -56,5 +70,9 @@ export abstract class SignalingClient {
   abstract sendCandidate(targetId: string, candidate: RTCIceCandidateInit): Promise<void>;
   abstract sendRenegotiate(targetId: string): Promise<void>;
   abstract sendStateUpdate(capabilities: DeviceMetadata['capabilities']): Promise<void>;
+  abstract sendKnock(): Promise<void>;
+  abstract sendKnockApproved(targetId: string): Promise<void>;
+  abstract sendKnockRejected(targetId: string): Promise<void>;
+  abstract sendKnockCancel(): Promise<void>;
   abstract setEventListeners(events: Partial<SignalingEvents>): void;
 }

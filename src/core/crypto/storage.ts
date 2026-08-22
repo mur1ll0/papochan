@@ -78,8 +78,12 @@ export function getDefaultDeviceName(): string {
   else if (ua.includes('iPhone')) os = 'iPhone';
   else if (ua.includes('iPad')) os = 'iPad';
 
-  const randomSuffix = Math.floor(1000 + Math.random() * 9000);
-  return `${os} #${randomSuffix}`;
+  const randomBytes = new Uint8Array(2);
+  if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
+    crypto.getRandomValues(randomBytes);
+  }
+  const suffix = 1000 + (((randomBytes[0] << 8) | randomBytes[1]) % 9000);
+  return `${os} #${suffix}`;
 }
 
 /**
@@ -114,11 +118,7 @@ export async function loadLocalIdentity(): Promise<SerializedIdentity | null> {
       req.onerror = () => reject(req.error);
     });
   } catch (err) {
-    console.warn('[Storage] Fallback to in-memory/localStorage due to IDB failure:', err);
-    if (typeof window !== 'undefined') {
-      const fallback = localStorage.getItem(KEY_IDENTITY);
-      return fallback ? JSON.parse(fallback) : null;
-    }
+    console.warn('[Storage] Error loading identity from IndexedDB:', err);
     return null;
   }
 }
@@ -144,7 +144,13 @@ export async function getOrCreateLocalIdentity(
   const pubKeys = exportPublicKeys(keyPair);
   const deviceType = detectDeviceType();
   const deviceName = customDeviceName || getDefaultDeviceName();
-  const username = customUsername || `Operator_${Math.floor(100 + Math.random() * 900)}`;
+
+  const randSuffixBytes = new Uint8Array(2);
+  if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
+    crypto.getRandomValues(randSuffixBytes);
+  }
+  const userSuffix = 100 + (((randSuffixBytes[0] << 8) | randSuffixBytes[1]) % 900);
+  const username = customUsername || `Operator_${userSuffix}`;
   const deviceId = crypto.randomUUID();
   const userId = crypto.randomUUID();
 
@@ -161,11 +167,13 @@ export async function getOrCreateLocalIdentity(
     createdAt: Date.now(),
   };
 
+  // Securely persist exclusively in IndexedDB (do NOT store private keys in localStorage)
   await saveLocalIdentity(newIdentity);
 
+  // Clean up any legacy plaintext private keys in localStorage
   if (typeof window !== 'undefined') {
     try {
-      localStorage.setItem(KEY_IDENTITY, JSON.stringify(newIdentity));
+      localStorage.removeItem(KEY_IDENTITY);
     } catch {
       // ignore
     }

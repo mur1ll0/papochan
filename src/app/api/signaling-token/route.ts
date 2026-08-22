@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAblyTokenRequest } from '@/lib/ably';
+import { checkRateLimit } from '@/lib/rateLimit';
 
 export async function GET(req: NextRequest) {
   return handleAuth(req);
@@ -10,6 +11,25 @@ export async function POST(req: NextRequest) {
 }
 
 async function handleAuth(req: NextRequest) {
+  // Apply rate limiting: max 30 token requests per minute per IP
+  const rateLimit = checkRateLimit(req, 30, 60000, 'signaling-token');
+  if (!rateLimit.success) {
+    return NextResponse.json(
+      {
+        error: 'Too many requests. Please slow down.',
+        retryAfter: rateLimit.reset,
+      },
+      {
+        status: 429,
+        headers: {
+          'Retry-After': String(rateLimit.reset),
+          'X-RateLimit-Limit': String(rateLimit.limit),
+          'X-RateLimit-Remaining': String(rateLimit.remaining),
+        },
+      }
+    );
+  }
+
   try {
     const { searchParams } = new URL(req.url);
     let clientId = searchParams.get('clientId');

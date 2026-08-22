@@ -1,10 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { generateRoomCode } from '@/lib/utils';
+import { checkRateLimit } from '@/lib/rateLimit';
 
 const hasDatabase = !!process.env.POSTGRES_PRISMA_URL || !!process.env.DATABASE_URL;
 
 export async function POST(req: NextRequest) {
+  const rateLimit = checkRateLimit(req, 20, 60000, 'rooms-create');
+  if (!rateLimit.success) {
+    return NextResponse.json(
+      { error: 'Too many room creation requests. Please try again later.' },
+      { status: 429, headers: { 'Retry-After': String(rateLimit.reset) } }
+    );
+  }
+
   try {
     const body = await req.json().catch(() => ({}));
     const requestedCode = body.roomCode?.toUpperCase().trim();
@@ -55,6 +64,14 @@ export async function POST(req: NextRequest) {
 }
 
 export async function GET(req: NextRequest) {
+  const rateLimit = checkRateLimit(req, 60, 60000, 'rooms-get');
+  if (!rateLimit.success) {
+    return NextResponse.json(
+      { error: 'Rate limit exceeded. Please wait.' },
+      { status: 429, headers: { 'Retry-After': String(rateLimit.reset) } }
+    );
+  }
+
   const { searchParams } = new URL(req.url);
   const code = searchParams.get('code')?.toUpperCase().trim();
 

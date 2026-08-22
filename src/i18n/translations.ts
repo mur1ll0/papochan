@@ -117,6 +117,20 @@ export const translations = {
     'call.outgoing.rejected': 'Chamada Recusada',
     'call.outgoing.noAnswer': 'Sem Resposta',
 
+    // Waiting Room & Knocking
+    'waitingRoom.badge': 'SALA DE ESPERA SEGURA',
+    'waitingRoom.title': 'Aguardando Aprovação',
+    'waitingRoom.subtitle': 'Alguém na sala precisa autorizar sua entrada antes de você se conectar.',
+    'waitingRoom.deviceInfo': 'Seu Aparelho:',
+    'waitingRoom.cancel': 'Cancelar Espera',
+    'waitingRoom.rejectedTitle': 'Entrada Recusada',
+    'waitingRoom.rejectedDesc': 'Os participantes da sala não autorizaram a sua entrada neste momento.',
+    'waitingRoom.backHome': 'Voltar ao Início',
+    'knockModal.title': 'Solicitação de Entrada',
+    'knockModal.subtitle': 'Deseja permitir a entrada deste participante na chamada?',
+    'knockModal.allow': 'Permitir',
+    'knockModal.reject': 'Recusar',
+
     // Settings & Noise Suppression
     'settings.title': 'Configurações de Áudio e Vídeo',
     'settings.noiseSuppression': 'Supressão de Ruído por IA',
@@ -264,6 +278,20 @@ export const translations = {
     'call.outgoing.cancel': 'Cancel Call',
     'call.outgoing.rejected': 'Call Declined',
     'call.outgoing.noAnswer': 'No Answer',
+
+    // Waiting Room & Knocking
+    'waitingRoom.badge': 'SECURE WAITING ROOM',
+    'waitingRoom.title': 'Waiting for Approval',
+    'waitingRoom.subtitle': 'Someone already in the room needs to admit you before you can connect.',
+    'waitingRoom.deviceInfo': 'Your Device:',
+    'waitingRoom.cancel': 'Cancel Waiting',
+    'waitingRoom.rejectedTitle': 'Entry Declined',
+    'waitingRoom.rejectedDesc': 'The participants in the room did not admit you at this time.',
+    'waitingRoom.backHome': 'Back to Home',
+    'knockModal.title': 'Join Request',
+    'knockModal.subtitle': 'Do you want to admit this participant to the call?',
+    'knockModal.allow': 'Admit',
+    'knockModal.reject': 'Decline',
 
     // Settings & Noise Suppression
     'settings.title': 'Audio & Video Settings',

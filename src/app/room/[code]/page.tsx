@@ -19,6 +19,8 @@ import { ControlBar } from '@/components/call/ControlBar';
 import { ChatPanel } from '@/components/chat/ChatPanel';
 import { SecurityModal } from '@/components/auth/SecurityModal';
 import { DeviceSetupModal } from '@/components/auth/DeviceSetupModal';
+import { WaitingRoomOverlay } from '@/components/call/WaitingRoomOverlay';
+import { KnockApprovalModal } from '@/components/call/KnockApprovalModal';
 import { AudioDiagnosticsAlert } from '@/components/call/AudioDiagnosticsAlert';
 import { ChameleonLogo } from '@/components/brand/ChameleonLogo';
 import { cn } from '@/lib/utils';
@@ -153,8 +155,41 @@ export default function RoomPage() {
     );
   }
 
+  // Waiting Room State (when user has knocked and is awaiting admission)
+  if (
+    hasJoined &&
+    (rtc.admissionStatus === 'knocking' ||
+      rtc.admissionStatus === 'checking' ||
+      rtc.admissionStatus === 'rejected')
+  ) {
+    return (
+      <WaitingRoomOverlay
+        roomCode={roomCode}
+        username={identity.username}
+        deviceName={identity.deviceName}
+        deviceType={identity.deviceType}
+        admissionStatus={rtc.admissionStatus}
+        onCancel={async () => {
+          const wasRejected = rtc.admissionStatus === 'rejected';
+          await rtc.cancelKnock();
+          setHasJoined(false);
+          if (wasRejected) {
+            router.push('/');
+          }
+        }}
+      />
+    );
+  }
+
   return (
     <main className="h-screen w-screen bg-slate-950 text-slate-100 flex flex-col overflow-hidden select-none">
+      {/* Knock Admission Approval Modal for Active Call Participants */}
+      <KnockApprovalModal
+        pendingKnocks={rtc.pendingKnocks}
+        onApprove={rtc.approveKnock}
+        onReject={rtc.rejectKnock}
+      />
+
       {/* Top Navigation Bar */}
       <header className="h-16 border-b border-slate-800 bg-slate-950/90 backdrop-blur-xl px-4 sm:px-6 flex items-center justify-between z-20 shrink-0">
         {/* Left: Room Logo & Room Code */}

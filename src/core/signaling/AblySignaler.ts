@@ -184,6 +184,28 @@ export class AblySignaler extends SignalingClient {
     }
   }
 
+  public async sendKnock(): Promise<void> {
+    if (this.localMeta) {
+      await this.publishEnvelope('knock', this.localMeta);
+    }
+  }
+
+  public async sendKnockApproved(targetId: string): Promise<void> {
+    await this.publishEnvelope('knock-approved', { approved: true, approver: this.localMeta }, targetId);
+  }
+
+  public async sendKnockRejected(targetId: string): Promise<void> {
+    await this.publishEnvelope('knock-rejected', { rejected: true, rejector: this.localMeta }, targetId);
+  }
+
+  public async sendKnockCancel(): Promise<void> {
+    await this.publishEnvelope('knock-cancel', {});
+  }
+
+  public getKnownPeersCount(): number {
+    return this.knownPeers.size;
+  }
+
   private async publishEnvelope<T>(
     type: SignalMessageType,
     payload: T,
@@ -282,6 +304,27 @@ export class AblySignaler extends SignalingClient {
       case 'leave': {
         this.knownPeers.delete(envelope.senderId);
         this.events.onPeerLeft?.(envelope.senderId);
+        break;
+      }
+      case 'knock': {
+        const peerMeta = envelope.payload as DeviceMetadata;
+        this.events.onKnock?.({
+          senderId: envelope.senderId,
+          meta: peerMeta,
+          timestamp: envelope.timestamp,
+        });
+        break;
+      }
+      case 'knock-approved': {
+        this.events.onKnockApproved?.(envelope.senderId);
+        break;
+      }
+      case 'knock-rejected': {
+        this.events.onKnockRejected?.(envelope.senderId);
+        break;
+      }
+      case 'knock-cancel': {
+        this.events.onKnockCancelled?.(envelope.senderId);
         break;
       }
     }
