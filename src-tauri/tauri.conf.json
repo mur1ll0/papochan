@@ -2,11 +2,12 @@
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "PapoChan",
   "version": "1.1.0",
-  "identifier": "network.ghostprotocol.app",
+  "identifier": "com.papochan.app",
   "build": {
     "frontendDist": "../out",
     "devUrl": "http://localhost:3000"
   },
+
   "app": {
     "windows": [
       {

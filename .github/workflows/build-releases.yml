@@ -9,6 +9,10 @@ on:
       - 'v*'
   workflow_dispatch:
     inputs:
+      app_url:
+        description: 'URL do servidor de produção (ex: https://papochan.vercel.app)'
+        required: false
+        type: string
       force_release:
         description: 'Forçar compilação e criação de release mesmo sem alteração de Major version'
         type: boolean
@@ -16,6 +20,10 @@ on:
 
 permissions:
   contents: write
+
+env:
+  NEXT_PUBLIC_APP_URL: ${{ github.event.inputs.app_url || vars.NEXT_PUBLIC_APP_URL || secrets.NEXT_PUBLIC_APP_URL || 'https://papochan.vercel.app' }}
+
 
 jobs:
   # ============================================================
@@ -138,23 +146,33 @@ jobs:
       - name: Generate Prisma Client
         run: npx prisma generate
 
-      - name: Ensure Frontend Dist Directory
+      - name: Ensure Frontend Dist Directory & Production Redirect
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path out
-          if (-not (Test-Path "out/index.html")) {
-            Set-Content -Path "out/index.html" -Value "<!DOCTYPE html><html><body>PapoChan</body></html>"
-          }
+          $targetUrl = $env:NEXT_PUBLIC_APP_URL
+          $htmlContent = @"
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <meta charset="UTF-8">
+            <meta http-equiv="refresh" content="0; url=$targetUrl">
+            <script>window.location.replace('$targetUrl');</script>
+          </head>
+          <body style="background:#020617;color:#fff;display:flex;align-items:center;justify-content:center;height:100vh;font-family:sans-serif;">
+            <p>Conectando ao PapoChan...</p>
+          </body>
+          </html>
+          "@
+          Set-Content -Path "out/index.html" -Value $htmlContent
 
       - name: Sync Tauri Config Version
         shell: pwsh
         run: |
-          node -e "const pkg=require('./package.json'); const tauri=require('./src-tauri/tauri.conf.json'); tauri.version=pkg.version; require('fs').writeFileSync('./src-tauri/tauri.conf.json', JSON.stringify(tauri, null, 2));"
+          node -e "const pkg=require('./package.json'); const tauri=require('./src-tauri/tauri.conf.json'); tauri.version=pkg.version; tauri.identifier='com.papochan.app'; require('fs').writeFileSync('./src-tauri/tauri.conf.json', JSON.stringify(tauri, null, 2));"
 
       - name: Build Web Application
         run: npm run build
-        env:
-          NEXT_PUBLIC_APP_URL: ${{ secrets.NEXT_PUBLIC_APP_URL || 'https://papochan.app' }}
 
       - name: Build Tauri Windows Executable
         run: npx tauri build
@@ -196,7 +214,6 @@ jobs:
           distribution: 'zulu'
           java-version: 21
 
-
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
@@ -206,24 +223,47 @@ jobs:
       - name: Generate Prisma Client
         run: npx prisma generate
 
-      - name: Ensure Frontend Dist Directory
+      - name: Ensure Frontend Dist Directory & Production Redirect
         run: |
           mkdir -p out
-          [ -f out/index.html ] || echo "<!DOCTYPE html><html><body>PapoChan</body></html>" > out/index.html
+          cat << 'EOF' > out/index.html
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <meta charset="UTF-8">
+            <script>
+              const targetUrl = '${{ env.NEXT_PUBLIC_APP_URL }}';
+              if (targetUrl) window.location.replace(targetUrl);
+            </script>
+          </head>
+          <body style="background:#020617;color:#fff;display:flex;align-items:center;justify-content:center;height:100vh;font-family:sans-serif;">
+            <p>Conectando ao PapoChan...</p>
+          </body>
+          </html>
+          EOF
 
       - name: Build Web Application
         run: npm run build
-        env:
-          NEXT_PUBLIC_APP_URL: ${{ secrets.NEXT_PUBLIC_APP_URL || 'https://papochan.app' }}
 
-      - name: Initialize & Sync Android
+      - name: Initialize & Sync Android with PapoChan Brand & Production URL
         run: |
           npx cap add android || true
           mkdir -p android/app/src/main/assets
+          mkdir -p android/app/src/main/res/values
           # Copy high-res PapoChan launcher icons into Android res mipmaps
           cp -r src-tauri/icons/android/* android/app/src/main/res/ || true
+          # Guarantee strings.xml has app_name PapoChan
+          node -e "
+            const fs = require('fs');
+            const stringsPath = 'android/app/src/main/res/values/strings.xml';
+            if (fs.existsSync(stringsPath)) {
+              let s = fs.readFileSync(stringsPath, 'utf8');
+              s = s.replace(/<string name=\"app_name\">.*?<\/string>/, '<string name=\"app_name\">PapoChan</string>');
+              s = s.replace(/<string name=\"title_activity_main\">.*?<\/string>/, '<string name=\"title_activity_main\">PapoChan</string>');
+              fs.writeFileSync(stringsPath, s);
+            }
+          "
           npx cap sync android
-
 
       - name: Build Android APK
         working-directory: ./android
@@ -269,19 +309,31 @@ jobs:
       - name: Generate Prisma Client
         run: npx prisma generate
 
-      - name: Ensure Frontend Dist Directory
+      - name: Ensure Frontend Dist Directory & Production Redirect
         run: |
           mkdir -p out
-          [ -f out/index.html ] || echo "<!DOCTYPE html><html><body>PapoChan</body></html>" > out/index.html
+          cat << 'EOF' > out/index.html
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <meta charset="UTF-8">
+            <script>
+              const targetUrl = '${{ env.NEXT_PUBLIC_APP_URL }}';
+              if (targetUrl) window.location.replace(targetUrl);
+            </script>
+          </head>
+          <body style="background:#020617;color:#fff;display:flex;align-items:center;justify-content:center;height:100vh;font-family:sans-serif;">
+            <p>Conectando ao PapoChan...</p>
+          </body>
+          </html>
+          EOF
 
       - name: Sync Tauri Config Version
         run: |
-          node -e "const pkg=require('./package.json'); const tauri=require('./src-tauri/tauri.conf.json'); tauri.version=pkg.version; require('fs').writeFileSync('./src-tauri/tauri.conf.json', JSON.stringify(tauri, null, 2));"
+          node -e "const pkg=require('./package.json'); const tauri=require('./src-tauri/tauri.conf.json'); tauri.version=pkg.version; tauri.identifier='com.papochan.app'; require('fs').writeFileSync('./src-tauri/tauri.conf.json', JSON.stringify(tauri, null, 2));"
 
       - name: Build Web Application
         run: npm run build
-        env:
-          NEXT_PUBLIC_APP_URL: ${{ secrets.NEXT_PUBLIC_APP_URL || 'https://papochan.app' }}
 
       - name: Build Tauri macOS DMG
         run: npx tauri build
@@ -290,6 +342,7 @@ jobs:
         run: |
           mkdir -p dist-artifacts
           find src-tauri/target/release/bundle/dmg -name "*.dmg" -exec cp {} dist-artifacts/papochan.dmg \;
+
 
       - name: Upload macOS Artifacts
         uses: actions/upload-artifact@v4

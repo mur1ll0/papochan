@@ -85,9 +85,19 @@ async function main() {
         fs.cpSync(srcAndroidIcons, androidRes, { recursive: true });
       }
 
+      // Ensure strings.xml has app_name PapoChan
+      const stringsPath = path.join(androidRes, 'values', 'strings.xml');
+      if (fs.existsSync(stringsPath)) {
+        let s = fs.readFileSync(stringsPath, 'utf8');
+        s = s.replace(/<string name="app_name">.*?<\/string>/, '<string name="app_name">PapoChan</string>');
+        s = s.replace(/<string name="title_activity_main">.*?<\/string>/, '<string name="title_activity_main">PapoChan</string>');
+        fs.writeFileSync(stringsPath, s);
+      }
+
       if (!fs.existsSync(iosDir) && process.platform === 'darwin') {
         run('npx cap add ios', 'Initializing iOS Project');
       }
+
 
       run('npx cap sync', 'Syncing Capacitor Mobile Assets & Plugins');
 

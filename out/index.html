@@ -10,13 +10,14 @@
       padding: 0;
       background-color: #020617;
       color: #f8fafc;
-      font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
       display: flex;
       flex-direction: column;
       align-items: center;
       justify-content: center;
       height: 100vh;
       text-align: center;
+      user-select: none;
     }
     .spinner {
       width: 48px;
@@ -35,6 +36,7 @@
       font-weight: 800;
       margin: 0 0 8px 0;
       color: #ffffff;
+      letter-spacing: -0.5px;
     }
     p {
       font-size: 14px;
@@ -42,10 +44,19 @@
       margin: 0;
     }
   </style>
+  <script>
+    (function() {
+      // If loaded inside native app wrapper, navigate to the production app URL
+      const appUrl = window.__PAPOCHAN_APP_URL__ || 'https://papochan.vercel.app';
+      if (appUrl && window.location.href !== appUrl) {
+        window.location.replace(appUrl);
+      }
+    })();
+  </script>
 </head>
 <body>
   <div class="spinner"></div>
   <h1>PapoChan</h1>
-  <p>Carregando canal criptografado...</p>
+  <p>Conectando ao canal seguro...</p>
 </body>
 </html>

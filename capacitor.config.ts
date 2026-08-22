@@ -1,12 +1,17 @@
 import type { CapacitorConfig } from '@capacitor/cli';
 
+const appUrl =
+  process.env.NEXT_PUBLIC_APP_URL?.trim() ||
+  process.env.APP_URL?.trim() ||
+  'https://papochan.vercel.app';
+
 const config: CapacitorConfig = {
-  appId: 'network.ghostprotocol.app',
-  appName: 'GhostProtocol',
+  appId: 'com.papochan.app',
+  appName: 'PapoChan',
   webDir: 'out',
   server: {
-    // When compiling for native mobile, points to the live Vercel backend or local dev server
-    url: process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000',
+    // When compiling for native mobile, points to the live Vercel backend
+    url: appUrl,
     cleartext: true,
     androidScheme: 'https',
   },
@@ -23,3 +28,4 @@ const config: CapacitorConfig = {
 };
 
 export default config;
+
