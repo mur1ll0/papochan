@@ -138,13 +138,21 @@ jobs:
       - name: Generate Prisma Client
         run: npx prisma generate
 
+      - name: Ensure Frontend Dist Directory
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path out
+          if (-not (Test-Path "out/index.html")) {
+            Set-Content -Path "out/index.html" -Value "<!DOCTYPE html><html><body>PapoChan</body></html>"
+          }
+
       - name: Sync Tauri Config Version
         shell: pwsh
         run: |
           node -e "const pkg=require('./package.json'); const tauri=require('./src-tauri/tauri.conf.json'); tauri.version=pkg.version; require('fs').writeFileSync('./src-tauri/tauri.conf.json', JSON.stringify(tauri, null, 2));"
 
       - name: Build Web Application
-        run: npm run build:web
+        run: npm run build
         env:
           NEXT_PUBLIC_APP_URL: ${{ secrets.NEXT_PUBLIC_APP_URL || 'https://papochan.app' }}
 
@@ -197,21 +205,30 @@ jobs:
       - name: Generate Prisma Client
         run: npx prisma generate
 
+      - name: Ensure Frontend Dist Directory
+        run: |
+          mkdir -p out
+          [ -f out/index.html ] || echo "<!DOCTYPE html><html><body>PapoChan</body></html>" > out/index.html
+
       - name: Build Web Application
-        run: npm run build:web
+        run: npm run build
         env:
           NEXT_PUBLIC_APP_URL: ${{ secrets.NEXT_PUBLIC_APP_URL || 'https://papochan.app' }}
 
       - name: Initialize & Sync Android
         run: |
           npx cap add android || true
+          mkdir -p android/app/src/main/assets
+          # Copy high-res PapoChan launcher icons into Android res mipmaps
+          cp -r src-tauri/icons/android/* android/app/src/main/res/ || true
           npx cap sync android
+
 
       - name: Build Android APK
         working-directory: ./android
         run: |
           chmod +x ./gradlew
-          ./gradlew assembleRelease || ./gradlew assembleDebug
+          ./gradlew assembleDebug
 
       - name: Prepare Android Artifacts
         run: |
@@ -251,12 +268,17 @@ jobs:
       - name: Generate Prisma Client
         run: npx prisma generate
 
+      - name: Ensure Frontend Dist Directory
+        run: |
+          mkdir -p out
+          [ -f out/index.html ] || echo "<!DOCTYPE html><html><body>PapoChan</body></html>" > out/index.html
+
       - name: Sync Tauri Config Version
         run: |
           node -e "const pkg=require('./package.json'); const tauri=require('./src-tauri/tauri.conf.json'); tauri.version=pkg.version; require('fs').writeFileSync('./src-tauri/tauri.conf.json', JSON.stringify(tauri, null, 2));"
 
       - name: Build Web Application
-        run: npm run build:web
+        run: npm run build
         env:
           NEXT_PUBLIC_APP_URL: ${{ secrets.NEXT_PUBLIC_APP_URL || 'https://papochan.app' }}
 
@@ -273,6 +295,7 @@ jobs:
         with:
           name: macos-binaries
           path: dist-artifacts/*
+
 
   # ============================================================
   # 4. PUBLISH ALL TO GITHUB RELEASES

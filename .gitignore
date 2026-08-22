@@ -85,7 +85,12 @@ web_modules/
 
 # Next.js build output
 .next
-out
+out/*
+!out/index.html
+
+# Tauri build artifacts
+src-tauri/target/
+
 
 # Nuxt.js build / generate output
 .nuxt

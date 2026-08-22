@@ -60,6 +60,16 @@ async function main() {
       console.log('  SYNCHRONIZING MOBILE APPS (ANDROID & iOS)');
       console.log('---------------------------------------------------------------');
 
+      // Ensure fallback out/index.html exists for Capacitor/Tauri
+      const outDir = path.join(rootDir, 'out');
+      if (!fs.existsSync(outDir)) {
+        fs.mkdirSync(outDir, { recursive: true });
+      }
+      const outIndex = path.join(outDir, 'index.html');
+      if (!fs.existsSync(outIndex)) {
+        fs.writeFileSync(outIndex, '<!DOCTYPE html><html><body>PapoChan</body></html>');
+      }
+
       // Check if android or ios directories exist, if not add them
       const androidDir = path.join(rootDir, 'android');
       const iosDir = path.join(rootDir, 'ios');
@@ -68,11 +78,19 @@ async function main() {
         run('npx cap add android', 'Initializing Android Project');
       }
 
+      // Copy Android mipmap icons if android exists
+      const androidRes = path.join(androidDir, 'app', 'src', 'main', 'res');
+      const srcAndroidIcons = path.join(rootDir, 'src-tauri', 'icons', 'android');
+      if (fs.existsSync(srcAndroidIcons) && fs.existsSync(androidRes)) {
+        fs.cpSync(srcAndroidIcons, androidRes, { recursive: true });
+      }
+
       if (!fs.existsSync(iosDir) && process.platform === 'darwin') {
         run('npx cap add ios', 'Initializing iOS Project');
       }
 
       run('npx cap sync', 'Syncing Capacitor Mobile Assets & Plugins');
+
 
       console.log('✔ Mobile project synchronized successfully!');
       console.log('  • To build Android APK / AAB: run "npm run mobile:android" (opens Android Studio)');

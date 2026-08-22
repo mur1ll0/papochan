@@ -18,7 +18,21 @@ export const metadata: Metadata = {
     'E2EE',
   ],
   authors: [{ name: 'PapoChan Team' }],
+  icons: {
+    icon: [
+      { url: '/favicon.svg', type: 'image/svg+xml' },
+      { url: '/icons/icon-512.png', sizes: '512x512', type: 'image/png' },
+      { url: '/favicon.ico', sizes: '32x32' },
+    ],
+    apple: [
+      { url: '/brand/papochan-app-icon.svg', sizes: '180x180', type: 'image/svg+xml' },
+      { url: '/icons/icon-512.png', sizes: '180x180', type: 'image/png' },
+    ],
+    shortcut: ['/favicon.svg'],
+  },
+  manifest: '/manifest.json',
 };
+
 
 export const viewport: Viewport = {
   width: 'device-width',
