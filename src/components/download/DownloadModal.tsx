@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import {
   X,
   Download,
@@ -39,6 +40,11 @@ export function DownloadModal({
   const { t } = useI18n();
   const [selectedPlatform, setSelectedPlatform] = useState<PlatformType>('windows');
   const [detectedUserOS, setDetectedUserOS] = useState<PlatformType>('windows');
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -49,7 +55,8 @@ export function DownloadModal({
     }
   }, [isOpen, initialPlatform]);
 
-  if (!isOpen) return null;
+  if (!isOpen || !mounted) return null;
+
 
   const currentConfig = PLATFORMS_CONFIG[selectedPlatform] || PLATFORMS_CONFIG.windows;
 
@@ -94,13 +101,14 @@ export function DownloadModal({
     }
   };
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-fadeIn">
+  return createPortal(
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 sm:p-6 bg-slate-950/85 backdrop-blur-md animate-fadeIn overflow-y-auto">
       <div
-        className="bg-slate-900 border border-slate-800 rounded-3xl max-w-2xl w-full max-h-[90vh] flex flex-col shadow-2xl overflow-hidden relative"
+        className="bg-slate-900 border border-slate-800 rounded-3xl max-w-2xl w-full max-h-[85vh] sm:max-h-[90vh] my-auto flex flex-col shadow-2xl overflow-hidden relative"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
+
         <div className="p-6 pb-4 border-b border-slate-800 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-2xl bg-papo-coral/20 border border-papo-coral/40 flex items-center justify-center text-papo-coral">
@@ -357,6 +365,8 @@ export function DownloadModal({
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
+

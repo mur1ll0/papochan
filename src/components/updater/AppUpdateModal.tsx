@@ -1,6 +1,7 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Download,
   AlertTriangle,
@@ -32,9 +33,14 @@ export function AppUpdateModal() {
   } = useAppVersion();
 
   const [isGuideOpen, setIsGuideOpen] = useState(false);
+  const [mounted, setMounted] = useState(false);
 
-  // If not running in native app, or no update needed, or dismissed (when non-mandatory)
-  if (!isNative || !needsUpdate || isDismissed) {
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  // If not running in native app, or no update needed, or dismissed (when non-mandatory), or not mounted
+  if (!isNative || !needsUpdate || isDismissed || !mounted) {
     return null;
   }
 
@@ -49,15 +55,16 @@ export function AppUpdateModal() {
     setIsGuideOpen(true);
   };
 
-  return (
+  return createPortal(
     <>
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md animate-fadeIn">
+      <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 sm:p-6 bg-slate-950/85 backdrop-blur-md animate-fadeIn overflow-y-auto">
         <div
-          className="bg-slate-900 border-2 border-papo-coral/60 rounded-3xl max-w-lg w-full p-6 sm:p-7 shadow-2xl space-y-6 relative overflow-hidden"
+          className="bg-slate-900 border-2 border-papo-coral/60 rounded-3xl max-w-lg w-full p-6 sm:p-7 shadow-2xl space-y-6 my-auto relative overflow-hidden"
           onClick={(e) => e.stopPropagation()}
         >
           {/* Ambient Glow */}
           <div className="absolute -top-24 -right-24 w-48 h-48 bg-papo-coral/20 rounded-full blur-3xl pointer-events-none" />
+
 
           {/* Header with Icon & Badge */}
           <div className="flex items-start justify-between gap-4">
@@ -161,6 +168,8 @@ export function AppUpdateModal() {
           initialPlatform={platform || 'windows'}
         />
       )}
-    </>
+    </>,
+    document.body
   );
 }
+
