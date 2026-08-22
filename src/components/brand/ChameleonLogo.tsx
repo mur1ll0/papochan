@@ -26,7 +26,7 @@ const CHAMELEON_CYAN_PATHS = [
 
 export function ChameleonLogo({
   className = '',
-  size = 48,
+  size,
   variant = 'dark',
   color,
   coralColor = '#F47151',
@@ -38,16 +38,18 @@ export function ChameleonLogo({
   const bodyColor = color || (isDark ? '#FFFFFF' : isMono ? 'currentColor' : '#222F3D');
   const coral = isMono ? bodyColor : coralColor;
   const cyan = isMono ? bodyColor : cyanColor;
+  const actualSize = size ?? (className ? undefined : 48);
 
   return (
     <svg
-      width={size}
-      height={typeof size === 'number' ? (size * 256) / 313 : undefined}
+      width={actualSize}
+      height={typeof actualSize === 'number' ? (actualSize * 256) / 313 : undefined}
       viewBox="0 0 313 256"
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
       className={className}
     >
+
       <g>
         {/* Coral Elements (Spines, Tail Spiral, Belly, Chin) */}
         {CHAMELEON_CORAL_PATHS.map((d, i) => (

@@ -10,8 +10,14 @@ export interface PlatformMetadata {
   guideType: 'smartscreen' | 'playprotect' | 'ios_pwa' | 'gatekeeper' | 'linux_perm';
 }
 
-const ghRepo = process.env.NEXT_PUBLIC_GITHUB_REPO?.replace(/^\/+|\/+$/g, '');
+const rawGhRepo = process.env.NEXT_PUBLIC_GITHUB_REPO?.trim() || '';
+const ghRepo = rawGhRepo
+  .replace(/^https?:\/\/(www\.)?github\.com\//i, '')
+  .replace(/^github\.com\//i, '')
+  .replace(/^\/+|\/+$/g, '');
+
 const ghBaseUrl = ghRepo ? `https://github.com/${ghRepo}/releases/latest/download` : '';
+
 
 export const PLATFORMS_CONFIG: Record<PlatformType, PlatformMetadata> = {
   windows: {

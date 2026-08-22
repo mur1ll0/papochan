@@ -20,19 +20,22 @@ const WORDMARK_PATHS = [
 
 export function PapoChanWordmark({
   className = '',
-  height = 36,
+  height,
   width,
   color = '#FFFFFF',
 }: PapoChanWordmarkProps) {
+  const actualHeight = height ?? (className ? undefined : 36);
+
   return (
     <svg
-      height={height}
-      width={width || (typeof height === 'number' ? (height * 750) / 188 : undefined)}
+      height={actualHeight}
+      width={width || (typeof actualHeight === 'number' ? (actualHeight * 750) / 188 : undefined)}
       viewBox="0 0 750 188"
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
       className={className}
     >
+
       <g fill={color} stroke={color} strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round">
         {WORDMARK_PATHS.map((d, i) => (
           <path key={i} d={d} fillRule="evenodd" />

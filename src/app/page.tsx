@@ -110,24 +110,32 @@ export default function HomePage() {
 
 
       {/* Main Content Area */}
-      <div className="max-w-6xl mx-auto px-4 sm:px-6 py-10 sm:py-16 w-full flex-1 flex flex-col items-center justify-center">
-        {/* Grand Centered Hero Section with BIG Logo and BIG Stylized Text */}
-        <div className="w-full flex flex-col items-center justify-center text-center gap-6 mb-12">
-          <div className="relative flex flex-row items-center gap-5 group rounded-[2.5rem] bg-slate-900/80 border border-slate-800/80 shadow-2xl backdrop-blur-md transition-transform duration-300 hover:scale-105">
-            {/* Mascot in Dark Mode (Large 160px with White body + Coral accents + Cyan eye) */}
-            <div className="p-5 sm:p-6 ">
-              <ChameleonLogo size={160} variant="dark" />
+      <div className="max-w-6xl mx-auto px-3.5 sm:px-6 py-4 sm:py-6 md:py-8 w-full flex-1 flex flex-col items-center justify-center">
+        {/* Responsive Hero Section with Bold Lateral Presence and Compact Height */}
+        <div className="w-full flex justify-center mb-6 sm:mb-8">
+          <div className="relative w-full max-w-sm xs:max-w-md sm:max-w-xl md:max-w-2xl lg:max-w-3xl flex flex-row items-center justify-center gap-4 sm:gap-7 md:gap-9 px-5 py-3 sm:px-8 sm:py-4 md:px-10 md:py-4.5 rounded-2xl sm:rounded-[2rem] bg-slate-900/80 border border-slate-800/80 shadow-2xl backdrop-blur-md transition-all duration-300 hover:scale-[1.01]">
+            {/* Mascot in Dark Mode: bold, crisp & prominent */}
+            <div className="shrink-0 flex items-center justify-center">
+              <ChameleonLogo
+                variant="dark"
+                className="w-16 xs:w-20 sm:w-28 md:w-36 lg:w-40 h-auto drop-shadow-md"
+              />
             </div>
-            
-            {/* Stylized Wordmark in Pure White (Height 76px) */}
-            <PapoChanWordmark height={76} color="#FFFFFF" className="drop-shadow-sm mr-4" />
-          </div>
 
-          
+            {/* Stylized Wordmark in Pure White: strong lateral footprint */}
+            <div className="shrink-0 flex items-center justify-center">
+              <PapoChanWordmark
+                color="#FFFFFF"
+                className="h-8 xs:h-10 sm:h-13 md:h-16 lg:h-18 w-auto drop-shadow-md"
+              />
+            </div>
+          </div>
         </div>
 
         {/* Action Grid (Rooms & Profile) */}
-        <div className="w-full grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+        <div className="w-full grid grid-cols-1 lg:grid-cols-12 gap-5 sm:gap-6 lg:gap-8 items-start">
+
+
           {/* Left Column: Actions (7 cols) */}
           <div className="lg:col-span-7 flex flex-col gap-6">
             {/* Navigation Tabs (Instant Rooms vs Saved Contacts) */}

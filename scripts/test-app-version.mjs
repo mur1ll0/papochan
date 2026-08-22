@@ -57,6 +57,23 @@ for (const plat of platforms) {
 }
 console.log('✔ All platform security guides validated!\n');
 
+// 3. Test GitHub Repo sanitization logic
+function sanitizeGitHubRepo(raw) {
+  return (raw || '')
+    .trim()
+    .replace(/^https?:\/\/(www\.)?github\.com\//i, '')
+    .replace(/^github\.com\//i, '')
+    .replace(/^\/+|\/+$/g, '');
+}
+
+console.log('▶ Testing GitHub Repo URL Sanitization...');
+assert.strictEqual(sanitizeGitHubRepo('mur1ll0/papochan'), 'mur1ll0/papochan');
+assert.strictEqual(sanitizeGitHubRepo('https://github.com/mur1ll0/papochan'), 'mur1ll0/papochan');
+assert.strictEqual(sanitizeGitHubRepo('https://github.com/mur1ll0/papochan/'), 'mur1ll0/papochan');
+assert.strictEqual(sanitizeGitHubRepo('http://github.com/mur1ll0/papochan'), 'mur1ll0/papochan');
+assert.strictEqual(sanitizeGitHubRepo('github.com/mur1ll0/papochan'), 'mur1ll0/papochan');
+console.log('✔ GitHub Repo URL sanitization tests passed!\n');
+
 console.log('===============================================================');
 console.log('✔ ALL VERSION & MULTIPLATFORM TESTS PASSED SUCCESSFULLY!');
 console.log('===============================================================');
