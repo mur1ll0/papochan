@@ -1,6 +1,7 @@
 'use client';
 
-import React from 'react';
+import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import {
   ShieldAlert,
   Clock,
@@ -33,11 +34,19 @@ export function WaitingRoomOverlay({
   onCancel,
 }: WaitingRoomOverlayProps) {
   const { t } = useI18n();
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  if (!mounted) return null;
 
   const isRejected = admissionStatus === 'rejected';
 
-  return (
-    <div className="fixed inset-0 z-50 bg-slate-950/95 backdrop-blur-2xl flex flex-col items-center justify-center p-4 sm:p-6 select-none animate-fadeIn">
+  return createPortal(
+    <div className="fixed inset-0 z-[9999] bg-slate-950/95 backdrop-blur-2xl flex flex-col items-center justify-center p-4 sm:p-6 select-none animate-fadeIn overflow-y-auto">
+
       {/* Decorative Glow */}
       <div className="absolute w-96 h-96 rounded-full bg-chan-turquoise/10 blur-3xl pointer-events-none -top-20 -left-20" />
       <div className="absolute w-96 h-96 rounded-full bg-papo-coral/10 blur-3xl pointer-events-none -bottom-20 -right-20" />
@@ -115,6 +124,8 @@ export function WaitingRoomOverlay({
           <span>{isRejected ? t('waitingRoom.backHome') : t('waitingRoom.cancel')}</span>
         </button>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
+

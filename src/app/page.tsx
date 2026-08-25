@@ -51,14 +51,19 @@ export default function HomePage() {
       await fetch(getApiEndpoint('/api/rooms'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ roomCode: code }),
+        body: JSON.stringify({
+          roomCode: code,
+          hostUserId: identity?.userId,
+          hostDeviceId: identity?.deviceId,
+        }),
       });
     } catch (err) {
       console.warn('[HomePage] Fallback to direct room route:', err);
     } finally {
-      router.push(`/room/${code}`);
+      router.push(`/room/${code}?host=1`);
     }
   };
+
 
   const handleJoinRoom = (e: React.FormEvent) => {
     e.preventDefault();

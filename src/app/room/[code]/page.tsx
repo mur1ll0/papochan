@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import {
   ShieldCheck,
   Copy,
@@ -28,8 +28,10 @@ import { cn } from '@/lib/utils';
 export default function RoomPage() {
   const params = useParams();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { t } = useI18n();
   const roomCode = ((params?.code as string) || '').toUpperCase();
+  const isHost = searchParams.get('host') === '1' || searchParams.get('isHost') === 'true';
 
   const { identity, isLoading: isCryptoLoading, updateProfile } = useCrypto();
 
@@ -51,7 +53,9 @@ export default function RoomPage() {
     identity,
     mediaEngine: media.engine,
     autoJoin: hasJoined,
+    isHost,
   });
+
 
   // Track unread chat messages when chat drawer is closed
   useEffect(() => {

@@ -56,20 +56,18 @@ async function handleAuth(req: NextRequest) {
     const apiKey = process.env.ABLY_API_KEY;
 
     if (!apiKey || apiKey.includes('mock-ably-key') || apiKey === 'your-ably-api-key-here') {
-      // In local dev without live Ably key, provide a clear structured response or mock token
+      // Return clear fallback indicator so client instantly switches to zero-latency HTTP signaling
       return NextResponse.json({
-        token: `mock_jwt_token_${Date.now()}`,
+        fallbackToHttp: true,
+        hasAbly: false,
         clientId,
         roomCode,
-        keyName: 'mock-key',
-        issuedAt: Date.now(),
-        expires: Date.now() + 3600000,
-        capability: JSON.stringify({ [`ghost:room:${roomCode}`]: ['*'] }),
       });
     }
 
     const tokenRequest = await createAblyTokenRequest(clientId, roomCode);
-    return NextResponse.json(tokenRequest);
+    return NextResponse.json({ ...tokenRequest, hasAbly: true });
+
   } catch (error: any) {
     console.error('[API:signaling-token] Error generating token request:', error);
     return NextResponse.json(

@@ -1,6 +1,7 @@
 'use client';
 
-import React from 'react';
+import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import {
   UserPlus,
   Check,
@@ -29,13 +30,19 @@ export function KnockApprovalModal({
   onReject,
 }: KnockApprovalModalProps) {
   const { t } = useI18n();
+  const [mounted, setMounted] = useState(false);
 
-  if (!pendingKnocks || pendingKnocks.length === 0) {
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  if (!pendingKnocks || pendingKnocks.length === 0 || !mounted) {
     return null;
   }
 
-  return (
-    <div className="fixed top-20 right-4 sm:right-6 z-50 flex flex-col gap-3 max-w-md w-full pointer-events-auto animate-slideDown select-none">
+  return createPortal(
+    <div className="fixed top-20 right-4 sm:right-6 z-[9999] flex flex-col gap-3 max-w-md w-full pointer-events-auto animate-slideDown select-none">
+
       {pendingKnocks.map((knock) => {
         const { senderId, meta } = knock;
         const deviceType = meta.deviceType || 'browser';
@@ -121,6 +128,8 @@ export function KnockApprovalModal({
           </div>
         );
       })}
-    </div>
+    </div>,
+    document.body
   );
 }
+

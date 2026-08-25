@@ -6,8 +6,8 @@ import {
   RemotePeerNode,
   CoPresenceUser,
 } from '@/core/webrtc/MeshManager';
-import { AblySignaler } from '@/core/signaling/AblySignaler';
-import { DeviceMetadata } from '@/core/signaling/SignalingClient';
+import { UniversalSignaler } from '@/core/signaling/UniversalSignaler';
+import { SignalingClient, DeviceMetadata } from '@/core/signaling/SignalingClient';
 import { MediaEngine } from '@/core/webrtc/MediaEngine';
 import {
   ChatTextMessage,
@@ -16,7 +16,6 @@ import {
 } from '@/core/webrtc/DataChannel';
 import { SerializedIdentity } from '@/core/crypto/storage';
 import { decodeBase64 } from 'tweetnacl-util';
-import { getApiEndpoint } from '@/lib/api';
 
 export type AdmissionStatus = 'idle' | 'checking' | 'knocking' | 'approved' | 'rejected';
 
@@ -25,6 +24,7 @@ export interface UseWebRTCOptions {
   identity: SerializedIdentity | null;
   mediaEngine: MediaEngine | null;
   autoJoin?: boolean;
+  isHost?: boolean;
 }
 
 export function useWebRTC({
@@ -32,6 +32,7 @@ export function useWebRTC({
   identity,
   mediaEngine,
   autoJoin = true,
+  isHost = false,
 }: UseWebRTCOptions) {
   const [signalingState, setSignalingState] = useState<
     'idle' | 'connecting' | 'connected' | 'disconnected' | 'failed'
@@ -46,7 +47,8 @@ export function useWebRTC({
   const [error, setError] = useState<string | null>(null);
 
   const meshManagerRef = useRef<MeshManager | null>(null);
-  const signalerRef = useRef<AblySignaler | null>(null);
+  const signalerRef = useRef<SignalingClient | null>(null);
+  const knockIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   // Initialize and Join Room
   const join = useCallback(async () => {
@@ -75,8 +77,8 @@ export function useWebRTC({
       const secretKeyEd = decodeBase64(identity.privateKeyEd);
       const secretKeyDh = decodeBase64(identity.privateKeyDh);
 
-      // Initialize Signaler
-      const signaler = new AblySignaler(getApiEndpoint('/api/signaling-token'));
+      // Initialize Universal Signaler (Ably + HTTP Bus Fallback)
+      const signaler = new UniversalSignaler(isHost);
       signalerRef.current = signaler;
 
       // Custom ICE servers if configured in env
@@ -155,12 +157,20 @@ export function useWebRTC({
           });
         },
         onKnockApproved: async () => {
+          if (knockIntervalRef.current) {
+            clearInterval(knockIntervalRef.current);
+            knockIntervalRef.current = null;
+          }
           setAdmissionStatus('approved');
           if (meshManagerRef.current && mediaEngine) {
             await meshManagerRef.current.syncLocalTracks();
           }
         },
         onKnockRejected: () => {
+          if (knockIntervalRef.current) {
+            clearInterval(knockIntervalRef.current);
+            knockIntervalRef.current = null;
+          }
           setAdmissionStatus('rejected');
         },
         onKnockCancelled: (senderId) => {
@@ -172,18 +182,23 @@ export function useWebRTC({
       await signaler.connect(roomCode, localMeta, secretKeyEd);
       setSignalingState('connected');
 
-      // Check if room is empty or if we need to knock
-      const existingPeersCount = signaler.getKnownPeersCount();
-      if (existingPeersCount === 0) {
-        // First participant in the room: automatically approved as Host
+      // Determine Host vs Knocking
+      if (isHost) {
+        // Explicitly designated as host / room creator
         setAdmissionStatus('approved');
         if (mediaEngine) {
           await mesh.syncLocalTracks();
         }
       } else {
-        // Room has active participants: enter waiting room and knock
+        // Guest joining: enter waiting room and actively knock
         setAdmissionStatus('knocking');
         await signaler.sendKnock();
+
+        // Periodically pulse knock every 3s until approved or rejected
+        if (knockIntervalRef.current) clearInterval(knockIntervalRef.current);
+        knockIntervalRef.current = setInterval(() => {
+          signaler.sendKnock().catch(() => {});
+        }, 3000);
       }
     } catch (err: any) {
       console.error('[useWebRTC] Failed to join room:', err);
@@ -191,10 +206,15 @@ export function useWebRTC({
       setAdmissionStatus('rejected');
       setError(err.message || 'Failed to connect to signaling');
     }
-  }, [roomCode, identity, mediaEngine]);
+  }, [roomCode, identity, mediaEngine, isHost]);
+
 
   const leave = useCallback(async () => {
     try {
+      if (knockIntervalRef.current) {
+        clearInterval(knockIntervalRef.current);
+        knockIntervalRef.current = null;
+      }
       if (signalerRef.current) {
         await signalerRef.current.disconnect();
         signalerRef.current = null;
@@ -207,6 +227,7 @@ export function useWebRTC({
       console.warn('[useWebRTC] Error leaving room:', err);
     } finally {
       setPeers([]);
+
       setCoPresenceGroups([]);
       setSignalingState('disconnected');
     }
