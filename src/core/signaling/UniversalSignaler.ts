@@ -56,11 +56,11 @@ export class UniversalSignaler extends SignalingClient {
         const ably = new AblySignaler(getApiEndpoint('/api/signaling-token'));
         ably.setEventListeners(this.events);
 
-        // Connect to Ably with 3-second timeout guard
+        // Connect to Ably with 12-second timeout guard for mobile connections
         await Promise.race([
           ably.connect(roomCode, localMeta, secretKeyEd),
           new Promise((_, reject) =>
-            setTimeout(() => reject(new Error('Ably connection timeout')), 3000)
+            setTimeout(() => reject(new Error('Ably connection timeout')), 12000)
           ),
         ]);
 

@@ -300,7 +300,7 @@ export class MeshManager {
   private attachLocalTracksToPeer(peer: PeerConnection): void {
     if (!this.mediaEngine) return;
 
-    const userStream = this.mediaEngine.getUserStream();
+    const userStream = this.mediaEngine.getRawUserStream() || this.mediaEngine.getUserStream();
     if (userStream) {
       userStream.getTracks().forEach((track) => {
         peer.addTrack(track, userStream);
@@ -321,7 +321,7 @@ export class MeshManager {
   public async syncLocalTracks(): Promise<void> {
     if (!this.mediaEngine) return;
 
-    const userStream = this.mediaEngine.getUserStream();
+    const userStream = this.mediaEngine.getRawUserStream() || this.mediaEngine.getUserStream();
     const screenStream = this.mediaEngine.getScreenStream();
 
     const capabilities = {

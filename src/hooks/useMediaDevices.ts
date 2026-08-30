@@ -124,10 +124,15 @@ export function useMediaDevices(options: UseMediaDevicesOptions = {}) {
     [refreshDevices]
   );
 
-  const toggleAudio = useCallback(() => {
+  const toggleAudio = useCallback(async () => {
     if (!engineRef.current) return false;
-    const isNowActive = engineRef.current.toggleAudio();
+    const isNowActive = await engineRef.current.toggleAudio();
     setIsAudioMuted(!isNowActive);
+
+    const stream = engineRef.current.getUserStream();
+    if (stream) {
+      setUserStream(new MediaStream(stream.getTracks()));
+    }
     return isNowActive;
   }, []);
 

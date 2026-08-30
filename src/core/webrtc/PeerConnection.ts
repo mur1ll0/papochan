@@ -21,6 +21,8 @@ export const DEFAULT_ICE_SERVERS: RTCIceServer[] = [
   { urls: 'stun:stun4.l.google.com:19302' },
   { urls: 'stun:stun.cloudflare.com:3478' },
   { urls: 'stun:stun.services.mozilla.com' },
+  { urls: 'stun:stun.nextcloud.com:443' },
+  { urls: 'stun:stun.relay.metered.ca:80' },
 ];
 
 /**

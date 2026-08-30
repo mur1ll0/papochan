@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { checkRateLimit } from '@/lib/rateLimit';
+import { db } from '@/lib/db';
 
-// In-Memory Signaling Bus with TTL & Room Presence Tracking
+// In-Memory Signaling Bus Cache with TTL
 interface StoredSignal {
   id: string;
   roomCode: string;
@@ -26,29 +27,10 @@ interface RoomState {
   messages: StoredSignal[];
 }
 
-// Global active rooms store in server memory
+// In-memory fallback / L1 cache
 const roomsStore = new Map<string, RoomState>();
 
-// Periodic cleanup of stale messages (> 60s) and inactive peers (> 25s)
-function cleanupRoom(room: RoomState) {
-  const now = Date.now();
-  // Prune messages older than 45 seconds
-  room.messages = room.messages.filter((m) => now - m.timestamp < 45000);
-
-  // Prune inactive peers (no heartbeat for > 25 seconds)
-  for (const [clientId, peer] of room.peers.entries()) {
-    if (now - peer.lastSeen > 25000) {
-      room.peers.delete(clientId);
-      if (room.hostId === clientId) {
-        // Assign new host if previous host left
-        const nextPeer = Array.from(room.peers.values())[0];
-        room.hostId = nextPeer ? nextPeer.clientId : null;
-      }
-    }
-  }
-}
-
-function getOrCreateRoom(roomCode: string): RoomState {
+function getOrCreateMemoryRoom(roomCode: string): RoomState {
   const code = roomCode.toUpperCase();
   let room = roomsStore.get(code);
   if (!room) {
@@ -61,12 +43,11 @@ function getOrCreateRoom(roomCode: string): RoomState {
     };
     roomsStore.set(code, room);
   }
-  cleanupRoom(room);
   return room;
 }
 
 export async function POST(req: NextRequest) {
-  const rateLimit = checkRateLimit(req, 120, 60000, 'signaling-post');
+  const rateLimit = checkRateLimit(req, 240, 60000, 'signaling-post');
   if (!rateLimit.success) {
     return NextResponse.json(
       { error: 'Rate limit exceeded' },
@@ -82,63 +63,109 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Missing roomCode or payload' }, { status: 400 });
     }
 
-    const room = getOrCreateRoom(roomCode);
+    const code = roomCode.toUpperCase();
     const now = Date.now();
+    const memRoom = getOrCreateMemoryRoom(code);
 
     if (action === 'heartbeat' && meta) {
       const clientId = `${meta.userId}:${meta.deviceId}`;
-      const existing = room.peers.get(clientId);
+      const peerId = `${code}:${clientId}`;
 
-      if (!room.hostId || (isHost && !existing)) {
-        room.hostId = clientId;
+      // Update in-memory
+      if (!memRoom.hostId || (isHost && !memRoom.peers.has(clientId))) {
+        memRoom.hostId = clientId;
       }
-
-      room.peers.set(clientId, {
+      memRoom.peers.set(clientId, {
         clientId,
         meta,
         lastSeen: now,
-        isHost: room.hostId === clientId,
+        isHost: memRoom.hostId === clientId,
       });
+
+      // Update PostgreSQL for Vercel multi-instance serverless sync
+      try {
+        await db.signalingPeer.upsert({
+          where: { id: peerId },
+          create: {
+            id: peerId,
+            roomCode: code,
+            clientId,
+            meta,
+            isHost: isHost || memRoom.hostId === clientId,
+            lastSeen: BigInt(now),
+          },
+          update: {
+            meta,
+            isHost: isHost || memRoom.hostId === clientId,
+            lastSeen: BigInt(now),
+          },
+        });
+      } catch (dbErr) {
+        console.warn('[Signaling:POST] DB peer upsert fallback to memory:', dbErr);
+      }
 
       return NextResponse.json({
         success: true,
-        isHost: room.hostId === clientId,
-        hostId: room.hostId,
-        peersCount: room.peers.size,
+        isHost: memRoom.hostId === clientId,
+        hostId: memRoom.hostId,
+        peersCount: memRoom.peers.size,
       });
     }
 
     if (action === 'leave' && meta) {
       const clientId = `${meta.userId}:${meta.deviceId}`;
-      room.peers.delete(clientId);
-      if (room.hostId === clientId) {
-        const nextPeer = Array.from(room.peers.values())[0];
-        room.hostId = nextPeer ? nextPeer.clientId : null;
+      const peerId = `${code}:${clientId}`;
+
+      memRoom.peers.delete(clientId);
+      if (memRoom.hostId === clientId) {
+        const nextPeer = Array.from(memRoom.peers.values())[0];
+        memRoom.hostId = nextPeer ? nextPeer.clientId : null;
       }
+
+      try {
+        await db.signalingPeer.delete({ where: { id: peerId } }).catch(() => {});
+      } catch {}
+
       return NextResponse.json({ success: true });
     }
 
     if (envelope) {
+      const storedId = `${now}-${Math.random().toString(36).slice(2, 7)}`;
       const stored: StoredSignal = {
-        id: `${now}-${Math.random().toString(36).slice(2, 7)}`,
-        roomCode: room.roomCode,
+        id: storedId,
+        roomCode: code,
         senderId: envelope.senderId,
         targetId: envelope.targetId,
         envelope,
         timestamp: envelope.timestamp || now,
       };
 
-      room.messages.push(stored);
-
-      // Keep at most 200 recent messages per room
-      if (room.messages.length > 200) {
-        room.messages.shift();
+      // Push to memory cache
+      memRoom.messages.push(stored);
+      if (memRoom.messages.length > 200) {
+        memRoom.messages.shift();
       }
 
-      // Update sender last seen
-      if (envelope.senderId && room.peers.has(envelope.senderId)) {
-        const peer = room.peers.get(envelope.senderId)!;
-        peer.lastSeen = now;
+      // Persist to PostgreSQL for multi-instance Vercel delivery
+      try {
+        await db.signalingMessage.create({
+          data: {
+            id: storedId,
+            roomCode: code,
+            senderId: envelope.senderId,
+            targetId: envelope.targetId || null,
+            envelope: envelope as any,
+            timestamp: BigInt(stored.timestamp),
+          },
+        });
+
+        // Prune stale DB messages in background (> 90s)
+        const cutoff = BigInt(now - 90000);
+        db.signalingMessage
+          .deleteMany({ where: { roomCode: code, timestamp: { lt: cutoff } } })
+          .catch(() => {});
+      } catch (dbErr) {
+        console.warn('[Signaling:POST] DB message persist fallback to memory:', dbErr);
       }
 
       return NextResponse.json({ success: true, messageId: stored.id });
@@ -161,34 +188,68 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Missing roomCode or clientId' }, { status: 400 });
   }
 
-  const room = getOrCreateRoom(roomCode);
   const now = Date.now();
+  const memRoom = getOrCreateMemoryRoom(roomCode);
 
-  // Update client heartbeat
-  if (room.peers.has(clientId)) {
-    const peer = room.peers.get(clientId)!;
-    peer.lastSeen = now;
+  // Update memory heartbeat
+  if (memRoom.peers.has(clientId)) {
+    const p = memRoom.peers.get(clientId)!;
+    p.lastSeen = now;
   }
 
-  // Filter messages for this client:
-  // - Sent after `since`
-  // - Broadcast (no targetId or targetId === '*') OR targeted specifically to `clientId`
-  // - Not sent by the client itself
-  const pendingMessages = room.messages.filter((m) => {
-    if (m.timestamp <= since) return false;
-    if (m.senderId === clientId) return false;
-    if (m.targetId && m.targetId !== '*' && m.targetId !== clientId) return false;
-    return true;
-  });
+  // Attempt database query first for cross-serverless consistency
+  try {
+    const sinceBigInt = BigInt(since);
+    const dbMessages = await db.signalingMessage.findMany({
+      where: {
+        roomCode,
+        timestamp: { gt: sinceBigInt },
+        senderId: { not: clientId },
+      },
+      orderBy: { timestamp: 'asc' },
+      take: 100,
+    });
 
-  const activePeers = Array.from(room.peers.values())
-    .filter((p) => p.clientId !== clientId && now - p.lastSeen < 20000)
-    .map((p) => p.meta);
+    const pendingMessages = dbMessages
+      .filter((m) => !m.targetId || m.targetId === '*' || m.targetId === clientId)
+      .map((m) => m.envelope);
 
-  return NextResponse.json({
-    messages: pendingMessages.map((m) => m.envelope),
-    peers: activePeers,
-    hostId: room.hostId,
-    serverTime: now,
-  });
+    const activePeersCutoff = BigInt(now - 20000);
+    const dbPeers = await db.signalingPeer.findMany({
+      where: {
+        roomCode,
+        clientId: { not: clientId },
+        lastSeen: { gt: activePeersCutoff },
+      },
+    });
+
+    const activePeers = dbPeers.map((p) => p.meta);
+    const hostPeer = dbPeers.find((p) => p.isHost);
+
+    return NextResponse.json({
+      messages: pendingMessages,
+      peers: activePeers,
+      hostId: hostPeer?.clientId || memRoom.hostId,
+      serverTime: now,
+    });
+  } catch (dbErr) {
+    // Graceful fallback to in-memory store if DB is temporarily unreachable
+    const pendingMemMessages = memRoom.messages.filter((m) => {
+      if (m.timestamp <= since) return false;
+      if (m.senderId === clientId) return false;
+      if (m.targetId && m.targetId !== '*' && m.targetId !== clientId) return false;
+      return true;
+    });
+
+    const activeMemPeers = Array.from(memRoom.peers.values())
+      .filter((p) => p.clientId !== clientId && now - p.lastSeen < 20000)
+      .map((p) => p.meta);
+
+    return NextResponse.json({
+      messages: pendingMemMessages.map((m) => m.envelope),
+      peers: activeMemPeers,
+      hostId: memRoom.hostId,
+      serverTime: now,
+    });
+  }
 }

@@ -138,12 +138,11 @@ export class MediaEngine {
       echoCancellation: this.config.enableEchoCancellation ?? true,
       noiseSuppression: this.config.enableNoiseSuppression ?? true,
       autoGainControl: this.config.enableAutoGainControl ?? true,
-      sampleRate: 48000,
-      channelCount: 1,
     };
 
     const videoConstraints: MediaTrackConstraints | boolean = {
       deviceId: this.config.videoDeviceId ? { exact: this.config.videoDeviceId } : undefined,
+      facingMode: 'user',
       width: { ideal: 1280, max: 1920 },
       height: { ideal: 720, max: 1080 },
       frameRate: { ideal: 30, max: 60 },
@@ -154,42 +153,51 @@ export class MediaEngine {
         audio: audioConstraints,
         video: videoConstraints,
       });
-
-      const audioTrack = this.rawUserStream.getAudioTracks()[0];
-      if (audioTrack) {
-        audioTrack.enabled = audio;
-      }
-      this.isAudioMuted = !audio;
-
-      const videoTrack = this.rawUserStream.getVideoTracks()[0];
-      if (videoTrack) {
-        videoTrack.enabled = video;
-      }
-      this.isVideoMuted = !video;
-
-      this.setupAudioPipeline();
-
-      if (this.config.audioOutputId) {
-        this.setAudioOutput(this.config.audioOutputId);
-      }
-
-      return this.getUserStream()!;
     } catch (err: any) {
-      console.warn('[MediaEngine] Primary getUserMedia failed, attempting fallback...', err);
+      console.warn('[MediaEngine] Primary getUserMedia failed, trying mobile fallback...', err);
 
       try {
-        this.rawUserStream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints, video: false });
-        this.isAudioMuted = !audio;
-        this.isVideoMuted = true;
-        const audioTrack = this.rawUserStream.getAudioTracks()[0];
-        if (audioTrack) audioTrack.enabled = audio;
-        this.setupAudioPipeline();
-        return this.getUserStream()!;
-      } catch (fallbackErr) {
-        console.error('[MediaEngine] Audio fallback also failed:', fallbackErr);
-        throw fallbackErr;
+        this.rawUserStream = await navigator.mediaDevices.getUserMedia({
+          audio: true,
+          video: video ? { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } } : false,
+        });
+      } catch (fbErr1) {
+        console.warn('[MediaEngine] Mobile resolution fallback failed, trying plain getUserMedia...', fbErr1);
+
+        try {
+          this.rawUserStream = await navigator.mediaDevices.getUserMedia({
+            audio: true,
+            video: video,
+          });
+        } catch (fbErr2) {
+          console.warn('[MediaEngine] Video getUserMedia failed entirely, falling back to audio only...', fbErr2);
+          this.rawUserStream = await navigator.mediaDevices.getUserMedia({
+            audio: true,
+            video: false,
+          });
+        }
       }
     }
+
+    const audioTrack = this.rawUserStream.getAudioTracks()[0];
+    if (audioTrack) {
+      audioTrack.enabled = audio;
+    }
+    this.isAudioMuted = !audio;
+
+    const videoTrack = this.rawUserStream.getVideoTracks()[0];
+    if (videoTrack) {
+      videoTrack.enabled = video;
+    }
+    this.isVideoMuted = !video || !videoTrack;
+
+    this.setupAudioPipeline();
+
+    if (this.config.audioOutputId) {
+      this.setAudioOutput(this.config.audioOutputId);
+    }
+
+    return this.getUserStream()!;
   }
 
   /**
@@ -367,9 +375,42 @@ export class MediaEngine {
     this.onVolumeCallback = callback;
   }
 
-  public toggleAudio(): boolean {
-    if (!this.rawUserStream) return false;
-    const audioTrack = this.rawUserStream.getAudioTracks()[0];
+  public async toggleAudio(): Promise<boolean> {
+    if (!this.rawUserStream) {
+      await this.startUserMedia(true, !this.isVideoMuted);
+      return !this.isAudioMuted;
+    }
+
+    let audioTrack = this.rawUserStream.getAudioTracks()[0];
+    if (!audioTrack || audioTrack.readyState === 'ended') {
+      try {
+        const freshAudioStream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: this.config.enableEchoCancellation ?? true,
+            noiseSuppression: this.config.enableNoiseSuppression ?? true,
+            autoGainControl: this.config.enableAutoGainControl ?? true,
+          },
+          video: false,
+        });
+
+        const newAudioTrack = freshAudioStream.getAudioTracks()[0];
+        if (newAudioTrack) {
+          if (audioTrack) {
+            this.rawUserStream.removeTrack(audioTrack);
+            this.processedUserStream?.removeTrack(audioTrack);
+          }
+          this.rawUserStream.addTrack(newAudioTrack);
+          this.setupAudioPipeline();
+          this.isAudioMuted = false;
+          return true;
+        }
+      } catch (err) {
+        console.error('[MediaEngine] Failed to acquire fresh audio track on toggle:', err);
+        return false;
+      }
+    }
+
+    audioTrack = this.rawUserStream.getAudioTracks()[0];
     if (audioTrack) {
       audioTrack.enabled = !audioTrack.enabled;
       this.isAudioMuted = !audioTrack.enabled;
@@ -393,17 +434,22 @@ export class MediaEngine {
 
     if (!videoTrack || videoTrack.readyState === 'ended') {
       try {
-        const videoConstraints: MediaTrackConstraints = {
-          deviceId: this.config.videoDeviceId ? { exact: this.config.videoDeviceId } : undefined,
-          width: { ideal: 1280, max: 1920 },
-          height: { ideal: 720, max: 1080 },
-          frameRate: { ideal: 30, max: 60 },
-        };
-
         const freshVideoStream = await navigator.mediaDevices.getUserMedia({
-          video: videoConstraints,
+          video: {
+            deviceId: this.config.videoDeviceId ? { exact: this.config.videoDeviceId } : undefined,
+            facingMode: 'user',
+            width: { ideal: 1280, max: 1920 },
+            height: { ideal: 720, max: 1080 },
+          },
           audio: false,
-        });
+        }).catch(() =>
+          navigator.mediaDevices.getUserMedia({
+            video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } },
+            audio: false,
+          })
+        ).catch(() =>
+          navigator.mediaDevices.getUserMedia({ video: true, audio: false })
+        );
 
         const newVideoTrack = freshVideoStream.getVideoTracks()[0];
         if (newVideoTrack) {
@@ -412,7 +458,9 @@ export class MediaEngine {
             this.processedUserStream?.removeTrack(videoTrack);
           }
           this.rawUserStream.addTrack(newVideoTrack);
-          this.processedUserStream?.addTrack(newVideoTrack);
+          if (this.processedUserStream) {
+            this.processedUserStream.addTrack(newVideoTrack);
+          }
           this.isVideoMuted = false;
           return true;
         }
@@ -438,6 +486,10 @@ export class MediaEngine {
 
   public getUserStream(): MediaStream | null {
     return this.processedUserStream || this.rawUserStream;
+  }
+
+  public getRawUserStream(): MediaStream | null {
+    return this.rawUserStream;
   }
 
   public getScreenStream(): MediaStream | null {

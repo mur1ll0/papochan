@@ -26,7 +26,7 @@ import { PapoChanWordmark } from '@/components/brand/PapoChanWordmark';
 import { LanguageSwitcher } from '@/components/brand/LanguageSwitcher';
 import { DownloadButton } from '@/components/download/DownloadButton';
 import { AppUpdateModal } from '@/components/updater/AppUpdateModal';
-import { generateRoomCode } from '@/lib/utils';
+import { generateRoomCode, formatRoomCodeInput, cleanRoomCode } from '@/lib/utils';
 import { getApiEndpoint } from '@/lib/api';
 import { cn } from '@/lib/utils';
 
@@ -67,9 +67,9 @@ export default function HomePage() {
 
   const handleJoinRoom = (e: React.FormEvent) => {
     e.preventDefault();
-    const cleanCode = joinCode.trim().toUpperCase();
-    if (cleanCode) {
-      router.push(`/room/${cleanCode}`);
+    const formatted = formatRoomCodeInput(joinCode);
+    if (formatted) {
+      router.push(`/room/${formatted}`);
     }
   };
 
@@ -99,48 +99,29 @@ export default function HomePage() {
             <span className="font-mono tracking-wide">{t('app.badge.e2ee')}</span>
           </div>
 
-          {/* Header Controls: Download App, Direct Call Badge & Language Selector */}
-          <div className="flex items-center gap-2.5 sm:gap-3">
-            <DownloadButton />
-
-            <div className="hidden md:flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-slate-900 border border-slate-800 text-xs sm:text-sm font-semibold text-slate-200">
-              <span className="w-2.5 h-2.5 rounded-full bg-chan-turquoise animate-pulse" />
-              <span>{t('app.badge.directCalls')}</span>
-            </div>
-
+          <div className="flex items-center gap-2 sm:gap-3">
             <LanguageSwitcher />
+            <DownloadButton />
           </div>
         </div>
       </header>
 
-
       {/* Main Content Area */}
       <div className="max-w-6xl mx-auto px-3.5 sm:px-6 py-4 sm:py-6 md:py-8 w-full flex-1 flex flex-col items-center justify-center">
-        {/* Responsive Hero Section with Bold Lateral Presence and Compact Height */}
+        {/* Responsive Hero Section */}
         <div className="w-full flex justify-center mb-6 sm:mb-8">
           <div className="relative w-full max-w-sm xs:max-w-md sm:max-w-xl md:max-w-2xl lg:max-w-3xl flex flex-row items-center justify-center gap-4 sm:gap-7 md:gap-9 px-5 py-3 sm:px-8 sm:py-4 md:px-10 md:py-4.5 rounded-2xl sm:rounded-[2rem] bg-slate-900/80 border border-slate-800/80 shadow-2xl backdrop-blur-md transition-all duration-300 hover:scale-[1.01]">
-            {/* Mascot in Dark Mode: bold, crisp & prominent */}
             <div className="shrink-0 flex items-center justify-center">
-              <ChameleonLogo
-                variant="dark"
-                className="w-16 xs:w-20 sm:w-28 md:w-36 lg:w-40 h-auto drop-shadow-md"
-              />
+              <ChameleonLogo variant="dark" className="w-16 xs:w-20 sm:w-28 md:w-36 lg:w-40 h-auto drop-shadow-md" />
             </div>
-
-            {/* Stylized Wordmark in Pure White: strong lateral footprint */}
             <div className="shrink-0 flex items-center justify-center">
-              <PapoChanWordmark
-                color="#FFFFFF"
-                className="h-8 xs:h-10 sm:h-13 md:h-16 lg:h-18 w-auto drop-shadow-md"
-              />
+              <PapoChanWordmark color="#FFFFFF" className="h-8 xs:h-10 sm:h-13 md:h-16 lg:h-18 w-auto drop-shadow-md" />
             </div>
           </div>
         </div>
 
         {/* Action Grid (Rooms & Profile) */}
         <div className="w-full grid grid-cols-1 lg:grid-cols-12 gap-5 sm:gap-6 lg:gap-8 items-start">
-
-
           {/* Left Column: Actions (7 cols) */}
           <div className="lg:col-span-7 flex flex-col gap-6">
             {/* Navigation Tabs (Instant Rooms vs Saved Contacts) */}
@@ -183,7 +164,7 @@ export default function HomePage() {
             {activeTab === 'rooms' && (
               <div className="p-6 sm:p-7 rounded-2xl bg-slate-900 border border-slate-800 shadow-xl space-y-6 animate-fadeIn">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  {/* Create Room Button with Papo Coral */}
+                  {/* Create Room Button */}
                   <button
                     onClick={handleCreateRoom}
                     disabled={isCreating}
@@ -198,9 +179,10 @@ export default function HomePage() {
                     <input
                       type="text"
                       value={joinCode}
-                      onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
+                      onChange={(e) => setJoinCode(formatRoomCodeInput(e.target.value))}
                       placeholder={t('home.input.roomCode')}
-                      className="w-full bg-slate-950 border-2 border-slate-700 rounded-2xl px-5 py-4 text-base font-mono font-bold tracking-wider text-slate-100 placeholder-slate-500 focus:outline-none focus:border-chan-turquoise"
+                      maxLength={11}
+                      className="w-full bg-slate-950 border-2 border-slate-700 rounded-2xl px-5 py-4 text-base font-mono font-bold tracking-wider text-slate-100 placeholder-slate-500 focus:outline-none focus:border-chan-turquoise uppercase"
                     />
                     <button
                       type="submit"

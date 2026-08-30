@@ -63,3 +63,29 @@ model AppRelease {
   @@index([platform])
 }
 
+model SignalingMessage {
+  id        String   @id @default(uuid())
+  roomCode  String
+  senderId  String
+  targetId  String?
+  envelope  Json
+  timestamp BigInt
+  createdAt DateTime @default(now())
+
+  @@index([roomCode, timestamp])
+}
+
+model SignalingPeer {
+  id        String   @id // Format: `${roomCode}:${clientId}`
+  roomCode  String
+  clientId  String
+  meta      Json
+  isHost    Boolean  @default(false)
+  lastSeen  BigInt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([roomCode])
+}
+
+

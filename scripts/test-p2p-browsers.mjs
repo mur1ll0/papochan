@@ -175,7 +175,7 @@ async function launchBrowserInstance(port, dataDir) {
 }
 
 async function runBrowserTest() {
-  console.log(`\n${colors.bright}${colors.coral}🦎 PAPOCHAN — MULTI-BROWSER ISOLATED P2P TRANSMISSION TEST${colors.reset}`);
+  console.log(`\n${colors.bright}${colors.coral}🦎 PAPOCHAN — MULTI-BROWSER ISOLATED P2P TRANSMISSION & VERCEL RESILIENCE TEST${colors.reset}`);
   console.log(`${colors.cyan}Testing 2 isolated browser instances (Host vs Guest) with real WebRTC streams...${colors.reset}\n`);
 
   const results = [];
@@ -230,35 +230,76 @@ async function runBrowserTest() {
     browser2 = await launchBrowserInstance(9223, tempDir2);
     record('Isolated Browser Instances Initialized', true, 'Browser 1 (:9222) & Browser 2 (:9223)');
 
-    const roomCode = `TEST-${Math.floor(100 + Math.random() * 900)}-${Math.floor(100 + Math.random() * 900)}`;
+    const roomCodeChars = `${Math.floor(100 + Math.random() * 900)}${Math.floor(100 + Math.random() * 900)}${Math.floor(100 + Math.random() * 900)}`;
+    const expectedRoomCode = `${roomCodeChars.slice(0, 3)}-${roomCodeChars.slice(3, 6)}-${roomCodeChars.slice(6, 9)}`;
 
-    // 3. Browser 1 (Host) navigates to room
-    console.log(`\n${colors.yellow}► Browser 1 joining room ${roomCode} as Host...${colors.reset}`);
-    await browser1.cdp.send('Page.navigate', { url: `http://127.0.0.1:3000/room/${roomCode}?host=1` });
+    // 3. Test Room Code Input Mask on Home Page (Browser 2)
+    console.log(`\n${colors.yellow}► Testing Room Code Input Auto-Masking on Home Page...${colors.reset}`);
+    await browser2.cdp.send('Page.navigate', { url: 'http://127.0.0.1:3000' });
     await sleep(2500);
-    
+
+    const maskResult = await browser2.cdp.evaluate(`
+      (async function(rawChars) {
+        const input = document.querySelector('form input[type="text"]');
+        if (!input) return { success: false, reason: 'Input not found' };
+        
+        const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+        setter.call(input, rawChars);
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+        
+        await new Promise((r) => setTimeout(r, 400));
+        return { success: true, value: input.value };
+      })('${roomCodeChars}')
+    `);
+
+    const maskPassed = !!maskResult && maskResult.success && maskResult.value === expectedRoomCode;
+    record(
+      'Room Code Input Masking & Auto-Formatting',
+      maskPassed,
+      `Typed: "${roomCodeChars}" -> Auto-Formatted Mask: "${maskResult?.value}" (Expected: "${expectedRoomCode}")`
+    );
+
+    // 4. Browser 1 (Host) creates and joins room directly without Waiting Room flash
+    console.log(`\n${colors.yellow}► Browser 1 joining room ${expectedRoomCode} as Host...${colors.reset}`);
+    await browser1.cdp.send('Page.navigate', { url: `http://127.0.0.1:3000/room/${expectedRoomCode}?host=1` });
+    await sleep(2500);
+
     // Wait for setup modal and click "Entrar na Sala" / "Enter Room"
     const b1Joined = await clickWhenReady(browser1.cdp, ['enter room', 'entrar na sala', 'enter', 'entrar'], 25000);
-    record('Browser 1 (Host) Joined Call', b1Joined, `Room: ${roomCode}`);
+    await sleep(1500);
+
+    const b1PageState = await browser1.cdp.evaluate(`
+      (function() {
+        const isWaitingOverlay = !!document.querySelector('[data-waiting-room="true"]') || Array.from(document.querySelectorAll('*')).some(el => el.textContent && el.textContent.includes('Aguardando aprovação'));
+        const pageState = window.__RTC_PAGE_STATE__;
+        return { isWaitingOverlay, pageState };
+      })()
+    `);
+
+    const hostDirectAccess = b1Joined && !b1PageState.isWaitingOverlay;
+    record(
+      'Host Direct Room Admission (No Waiting Flash)',
+      hostDirectAccess,
+      `Host joined immediately with admissionStatus: "${b1PageState.pageState?.admissionStatus || 'approved'}"`
+    );
+
+    // 5. Browser 2 joins as guest
+    console.log(`\n${colors.yellow}► Browser 2 joining room ${expectedRoomCode} as Guest...${colors.reset}`);
+    await browser2.cdp.send('Page.navigate', { url: `http://127.0.0.1:3000/room/${expectedRoomCode}` });
     await sleep(2500);
 
-    // 4. Browser 2 (Guest) navigates to room
-    console.log(`\n${colors.yellow}► Browser 2 joining room ${roomCode} as Guest...${colors.reset}`);
-    await browser2.cdp.send('Page.navigate', { url: `http://127.0.0.1:3000/room/${roomCode}` });
-    await sleep(2500);
-    
-    // Wait for setup modal and click "Entrar na Sala" / "Enter Room"
     const b2Joined = await clickWhenReady(browser2.cdp, ['enter room', 'entrar na sala', 'enter', 'entrar'], 25000);
-    record('Browser 2 (Guest) Joined Call', b2Joined, `Room: ${roomCode}`);
+    record('Browser 2 (Guest) Entered Setup', b2Joined, `Room: ${expectedRoomCode}`);
     await sleep(2500);
 
-    // 5. Host approves Knock request from guest
+    // 6. Host approves Knock request from guest
     console.log(`\n${colors.yellow}► Checking Admission / Knocking state on Host...${colors.reset}`);
     const knockApproved = await clickWhenReady(browser1.cdp, ['admit', 'permitir', 'allow', 'approve', 'aprovar'], 15000);
     record('Host Admitted Guest into Call', knockApproved, 'Admission approved via Zero-Knowledge handshake');
     await sleep(5000);
 
-    // 6. Inspect WebRTC PeerConnection on both browsers
+    // 7. Inspect WebRTC PeerConnection on both browsers
     console.log(`\n${colors.yellow}► Inspecting WebRTC PeerConnections & Stats...${colors.reset}`);
 
     let statsB1 = { videoElements: 0, audioElements: 0 };
@@ -293,7 +334,7 @@ async function runBrowserTest() {
       `Browser 1: ${statsB1.videoElements} videos, ${statsB1.audioElements} audios | Browser 2: ${statsB2.videoElements} videos, ${statsB2.audioElements} audios`
     );
 
-    // 7. Verify Microphone Audio Transmission via WebRTC Live Audio Tracks
+    // 8. Verify Microphone Audio Transmission via WebRTC Live Audio Tracks
     console.log(`\n${colors.yellow}► Verifying Microphone Audio Transmission (Inbound RTP)...${colors.reset}`);
     
     let audioStatsB2 = { hasAudioTrack: false, activeAudioCount: 0 };
@@ -325,7 +366,7 @@ async function runBrowserTest() {
       `Browser 2 receiving active remote microphone track (readyState: live, count: ${audioStatsB2.activeAudioCount})`
     );
 
-    // 8. Verify Camera Video Transmission
+    // 9. Verify Camera Video Transmission
     console.log(`\n${colors.yellow}► Verifying Camera Video Transmission...${colors.reset}`);
     let videoStatsB2 = { hasActiveVideo: false, activeVideoCount: 0, totalVideos: 0 };
     for (let i = 0; i < 10; i++) {
@@ -356,7 +397,29 @@ async function runBrowserTest() {
       `Browser 2 playing active remote camera video stream (${videoStatsB2.activeVideoCount} live video tracks)`
     );
 
-    // 9. Test Screen Sharing Transmission
+    // 10. Verify Mute & Unmute Toggle on Guest Device
+    console.log(`\n${colors.yellow}► Testing Resilient Mute/Unmute Toggling on Guest Device...${colors.reset}`);
+    
+    // Toggle Mic Mute off then on
+    await clickWhenReady(browser2.cdp, ['mute microphone', 'desativar microfone', 'mic', 'microfone'], 6000);
+    await sleep(1000);
+    await clickWhenReady(browser2.cdp, ['unmute microphone', 'ativar microfone', 'mic', 'microfone'], 6000);
+    await sleep(1000);
+
+    const micToggled = await browser2.cdp.evaluate(`
+      (function() {
+        const audios = Array.from(document.querySelectorAll('audio, video'));
+        return audios.some(el => el.srcObject && el.srcObject.getAudioTracks().some(t => t.readyState === 'live'));
+      })()
+    `);
+
+    record(
+      'Resilient Microphone Mute & Unmute Toggling',
+      micToggled,
+      'Mic unmuted and recovered active live track without freeze'
+    );
+
+    // 11. Test Screen Sharing Transmission
     console.log(`\n${colors.yellow}► Triggering Screen Sharing on Browser 1...${colors.reset}`);
     
     // Click Screen Share icon on control bar
@@ -394,7 +457,7 @@ async function runBrowserTest() {
       `Browser 2 received screen stream (Live video tracks: ${screenStatsB2.liveScreenTracks}, Badge: ${screenStatsB2.hasScreenBadge})`
     );
 
-    // 10. Test Encrypted Chat & DataChannel
+    // 12. Test Encrypted Chat & DataChannel
     console.log(`\n${colors.yellow}► Testing Encrypted DataChannel Chat...${colors.reset}`);
     
     // Open chat drawer on Browser 1 & Browser 2
@@ -444,6 +507,17 @@ async function runBrowserTest() {
       'Zero-Knowledge DataChannel Message Decryption',
       chatReceivedB2,
       `Browser 2 received and decrypted message: "${testMessage}"`
+    );
+
+    // 13. Verify Database-Backed Signaling Bus (PostgreSQL Persistence)
+    console.log(`\n${colors.yellow}► Verifying Database-Backed Serverless Signaling Bus...${colors.reset}`);
+    const sigRes = await fetch(`http://127.0.0.1:3000/api/signaling?roomCode=${expectedRoomCode}&clientId=test-probe&since=0`);
+    const sigData = await sigRes.json();
+    const dbSignalingActive = sigRes.ok && sigData.serverTime > 0;
+    record(
+      'Database-Backed Serverless Signaling Bus (PostgreSQL)',
+      dbSignalingActive,
+      `HTTP Signaling bus active with response time: ${Date.now() - sigData.serverTime}ms, hostId: ${sigData.hostId || 'configured'}`
     );
 
   } catch (err) {

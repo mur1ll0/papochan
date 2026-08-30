@@ -110,7 +110,7 @@ export default function RoomPage() {
   };
 
   const handleToggleAudio = async () => {
-    media.toggleAudio();
+    await media.toggleAudio();
     await rtc.syncTracks();
   };
 
@@ -176,6 +176,7 @@ export default function RoomPage() {
 
   // Waiting Room State (when user has knocked and is awaiting admission)
   if (
+    !isHost &&
     hasJoined &&
     (rtc.admissionStatus === 'knocking' ||
       rtc.admissionStatus === 'checking' ||

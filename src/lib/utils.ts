@@ -38,3 +38,27 @@ export function generateRoomCode(): string {
   }
   return code;
 }
+
+export function cleanRoomCode(input: string): string {
+  if (!input) return '';
+  // Extract code if a full URL was pasted
+  let raw = input.trim();
+  const urlMatch = raw.match(/\/room\/([A-Za-z0-9-]+)/i);
+  if (urlMatch && urlMatch[1]) {
+    raw = urlMatch[1];
+  }
+  return raw.replace(/[^A-Za-z0-9]/g, '').toUpperCase().slice(0, 9);
+}
+
+export function formatRoomCodeInput(input: string): string {
+  if (!input) return '';
+  const cleaned = cleanRoomCode(input);
+  if (!cleaned) return '';
+
+  const parts: string[] = [];
+  for (let i = 0; i < cleaned.length; i += 3) {
+    parts.push(cleaned.slice(i, i + 3));
+  }
+  return parts.join('-');
+}
+

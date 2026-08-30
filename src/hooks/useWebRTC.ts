@@ -37,8 +37,10 @@ export function useWebRTC({
   const [signalingState, setSignalingState] = useState<
     'idle' | 'connecting' | 'connected' | 'disconnected' | 'failed'
   >('idle');
-  const [admissionStatus, setAdmissionStatus] = useState<AdmissionStatus>('idle');
-  const [pendingKnocks, setPendingKnocks] = useState<Array<{ senderId: string; meta: DeviceMetadata; timestamp: number }>>([]);
+  const [admissionStatus, setAdmissionStatus] = useState<AdmissionStatus>(
+    isHost ? 'approved' : 'idle'
+  );
+  const [pendingKnocks, setPendingKnocks] = useState<KnockRequest[]>([]);
   const [peers, setPeers] = useState<RemotePeerNode[]>([]);
   const [coPresenceGroups, setCoPresenceGroups] = useState<CoPresenceUser[]>([]);
   const [messages, setMessages] = useState<ChatTextMessage[]>([]);
@@ -56,7 +58,7 @@ export function useWebRTC({
 
     try {
       setSignalingState('connecting');
-      setAdmissionStatus('checking');
+      setAdmissionStatus(isHost ? 'approved' : 'checking');
       setError(null);
 
       const localMeta: DeviceMetadata = {
