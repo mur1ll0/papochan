@@ -304,6 +304,9 @@ export class MediaEngine {
       }
 
       this.audioContext = new AudioCtx({ sampleRate: 48000 });
+      if (this.audioContext.state === 'suspended') {
+        this.audioContext.resume().catch(() => {});
+      }
 
       // 1. Analyser Node for Volume Meter & Diagnostics
       this.analyser = this.audioContext.createAnalyser();
@@ -324,8 +327,11 @@ export class MediaEngine {
       });
 
       const processedAudioTrack = this.noiseSuppressionEngine.attachSourceTrack(audioTrack);
+      if (processedAudioTrack) {
+        processedAudioTrack.enabled = audioTrack.enabled;
+      }
 
-      const tracks: MediaStreamTrack[] = [processedAudioTrack];
+      const tracks: MediaStreamTrack[] = [processedAudioTrack || audioTrack];
       const videoTrack = this.rawUserStream.getVideoTracks()[0];
       if (videoTrack) {
         tracks.push(videoTrack);
@@ -339,6 +345,10 @@ export class MediaEngine {
         if (this.isAudioMuted || !this.diagnosticsAnalyzer) {
           this.onVolumeCallback?.(0);
           return;
+        }
+
+        if (this.audioContext && this.audioContext.state === 'suspended') {
+          this.audioContext.resume().catch(() => {});
         }
 
         const metrics = this.diagnosticsAnalyzer.analyze();

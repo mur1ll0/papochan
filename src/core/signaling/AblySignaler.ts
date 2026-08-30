@@ -327,7 +327,15 @@ export class AblySignaler extends SignalingClient {
         this.events.onKnockCancelled?.(envelope.senderId);
         break;
       }
+      case 'chat': {
+        this.events.onChatMessage?.(envelope.payload);
+        break;
+      }
     }
+  }
+
+  public async sendChatMessage(msg: any): Promise<void> {
+    await this.publishEnvelope('chat', msg);
   }
 
   private handlePresenceEnter(msg: Ably.PresenceMessage): void {

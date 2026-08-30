@@ -56,6 +56,21 @@ export default function RoomPage() {
     isHost,
   });
 
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      (window as any).__RTC_PAGE_STATE__ = {
+        hasJoined,
+        admissionStatus: rtc.admissionStatus,
+        signalingState: rtc.signalingState,
+        peersCount: rtc.peers.length,
+        error: rtc.error,
+        isHost,
+      };
+      (window as any).__RTC_MESSAGES__ = rtc.messages;
+      (window as any).__RTC_SEND_MESSAGE__ = rtc.sendMessage;
+    }
+  }, [hasJoined, rtc.admissionStatus, rtc.signalingState, rtc.peers.length, rtc.error, isHost, rtc.messages, rtc.sendMessage]);
+
 
   // Track unread chat messages when chat drawer is closed
   useEffect(() => {

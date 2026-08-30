@@ -110,7 +110,11 @@ export function useWebRTC({
           setCoPresenceGroups([...groups]);
         },
         onChatMessage: (msg) => {
-          setMessages((prev) => [...prev, msg]);
+          if (!msg || msg.senderId === `${localMeta.userId}:${localMeta.deviceId}`) return;
+          setMessages((prev) => {
+            if (prev.some((m) => m.id === msg.id)) return prev;
+            return [...prev, msg];
+          });
         },
         onTyping: (indicator) => {
           setTypingUsers((prev) => {
@@ -145,7 +149,21 @@ export function useWebRTC({
 
       // Signaler events for Waiting Room / Knocking
       signaler.setEventListeners({
+        onHostAssigned: async (assignedAsHost) => {
+          console.log('[DEBUG-RTC] onHostAssigned:', assignedAsHost);
+          if (assignedAsHost) {
+            if (knockIntervalRef.current) {
+              clearInterval(knockIntervalRef.current);
+              knockIntervalRef.current = null;
+            }
+            setAdmissionStatus('approved');
+            if (meshManagerRef.current && mediaEngine) {
+              await meshManagerRef.current.syncLocalTracks();
+            }
+          }
+        },
         onKnock: (request) => {
+          console.log('[DEBUG-RTC] onKnock from:', request.senderId);
           // Auto-approve if it's a sister device belonging to the exact same user
           if (request.meta.userId === localMeta.userId) {
             signaler.sendKnockApproved(request.senderId);
@@ -157,6 +175,7 @@ export function useWebRTC({
           });
         },
         onKnockApproved: async () => {
+          console.log('[DEBUG-RTC] onKnockApproved');
           if (knockIntervalRef.current) {
             clearInterval(knockIntervalRef.current);
             knockIntervalRef.current = null;
@@ -167,6 +186,7 @@ export function useWebRTC({
           }
         },
         onKnockRejected: () => {
+          console.log('[DEBUG-RTC] onKnockRejected');
           if (knockIntervalRef.current) {
             clearInterval(knockIntervalRef.current);
             knockIntervalRef.current = null;
@@ -182,9 +202,12 @@ export function useWebRTC({
       await signaler.connect(roomCode, localMeta, secretKeyEd);
       setSignalingState('connected');
 
+      const isCurrentHost = isHost || (signaler as any).isCurrentHost || (signaler as any).isHost;
+      console.log('[DEBUG-RTC] Connected signaler, isCurrentHost:', isCurrentHost);
+
       // Determine Host vs Knocking
-      if (isHost) {
-        // Explicitly designated as host / room creator
+      if (isCurrentHost) {
+        // Explicitly designated as host or automatically assigned by room
         setAdmissionStatus('approved');
         if (mediaEngine) {
           await mesh.syncLocalTracks();
@@ -202,6 +225,9 @@ export function useWebRTC({
       }
     } catch (err: any) {
       console.error('[useWebRTC] Failed to join room:', err);
+      if (typeof window !== 'undefined') {
+        (window as any).__LAST_RTC_ERROR__ = err?.stack || err?.message || String(err);
+      }
       setSignalingState('failed');
       setAdmissionStatus('rejected');
       setError(err.message || 'Failed to connect to signaling');
@@ -319,16 +345,35 @@ export function useWebRTC({
     setFileTransfers(new Map());
   }, []);
 
+  const joinedRoomRef = useRef<string | null>(null);
+
   // Auto-join if enabled
   useEffect(() => {
     if (autoJoin && roomCode && identity) {
-      join();
+      if (joinedRoomRef.current !== roomCode) {
+        joinedRoomRef.current = roomCode;
+        join();
+      }
+    } else if (!autoJoin && joinedRoomRef.current) {
+      joinedRoomRef.current = null;
+      leave();
     }
+  }, [autoJoin, roomCode, identity, join, leave]);
 
+  // When mediaEngine is attached or updated while in room
+  useEffect(() => {
+    if (meshManagerRef.current && mediaEngine) {
+      meshManagerRef.current.attachMediaEngine(mediaEngine);
+      meshManagerRef.current.syncLocalTracks();
+    }
+  }, [mediaEngine]);
+
+  // Leave on component unmount
+  useEffect(() => {
     return () => {
       leave();
     };
-  }, [autoJoin, roomCode, identity]);
+  }, [leave]);
 
   return {
     signalingState,

@@ -120,7 +120,19 @@ export class UniversalSignaler extends SignalingClient {
     await this.activeSignaler.sendKnockCancel();
   }
 
+  public async sendKnockCancelled(): Promise<void> {
+    await (this.activeSignaler as any).sendKnockCancel?.();
+  }
+
+  public async sendChatMessage(msg: any): Promise<void> {
+    await this.activeSignaler.sendChatMessage(msg);
+  }
+
   public getKnownPeersCount(): number {
     return (this.activeSignaler as any).getKnownPeersCount?.() || 0;
+  }
+
+  public get isCurrentHost(): boolean {
+    return (this.activeSignaler as any).isHost ?? this.isHost;
   }
 }

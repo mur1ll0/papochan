@@ -10,19 +10,14 @@ export function getApiEndpoint(path: string): string {
   if (typeof window !== 'undefined') {
     const origin = window.location.origin;
 
-    // If running directly inside a standard web browser on a live website
+    // If running directly inside any web browser (localhost, 127.0.0.1, custom domain, Vercel)
     if (
-      origin.startsWith('http://') ||
-      origin.startsWith('https://')
+      origin &&
+      (origin.startsWith('http://') || origin.startsWith('https://')) &&
+      !origin.startsWith('tauri://') &&
+      !origin.startsWith('capacitor://')
     ) {
-      if (
-        !origin.includes('localhost') &&
-        !origin.includes('127.0.0.1') &&
-        !origin.includes('tauri://') &&
-        !origin.includes('capacitor://')
-      ) {
-        return cleanPath;
-      }
+      return cleanPath;
     }
   }
 

@@ -9,21 +9,24 @@ export interface PeerConnectionOptions {
   onTrackRemoved?: (track: MediaStreamTrack, peerId: string) => void;
   onDataChannel: (channel: RTCDataChannel, peerId: string) => void;
   onIceCandidate: (candidate: RTCIceCandidateInit, targetId: string) => void;
-  onNegotiationNeeded: (targetId: string) => void;
+  onNegotiationNeeded: (targetId: string) => Promise<void> | void;
   onConnectionStateChange: (state: RTCPeerConnectionState, peerId: string) => void;
 }
 
-const DEFAULT_ICE_SERVERS: RTCIceServer[] = [
+export const DEFAULT_ICE_SERVERS: RTCIceServer[] = [
   { urls: 'stun:stun.l.google.com:19302' },
   { urls: 'stun:stun1.l.google.com:19302' },
   { urls: 'stun:stun2.l.google.com:19302' },
   { urls: 'stun:stun3.l.google.com:19302' },
   { urls: 'stun:stun4.l.google.com:19302' },
+  { urls: 'stun:stun.cloudflare.com:3478' },
+  { urls: 'stun:stun.services.mozilla.com' },
 ];
 
 /**
- * PeerConnection encapsulates RTCPeerConnection implementing the Perfect Negotiation
- * state machine pattern to seamlessly handle renegotiation, glare, and collision avoidance.
+ * PeerConnection encapsulates RTCPeerConnection implementing the standard
+ * W3C Perfect Negotiation state machine pattern to seamlessly handle renegotiation,
+ * multi-track streams (camera + screen share), glare, and collision avoidance.
  */
 export class PeerConnection {
   public readonly pc: RTCPeerConnection;
@@ -38,6 +41,7 @@ export class PeerConnection {
   private queuedIceCandidates: RTCIceCandidateInit[] = [];
   private remoteStream = new MediaStream();
   private dataChannel: RTCDataChannel | null = null;
+  private isClosed = false;
 
   constructor(private options: PeerConnectionOptions) {
     this.localId = options.localId;
@@ -60,13 +64,14 @@ export class PeerConnection {
   }
 
   private setupListeners(): void {
-    // 1. Negotiation needed
+    // 1. Perfect Negotiation: negotiation needed
     this.pc.onnegotiationneeded = async () => {
+      if (this.isClosed) return;
       try {
         this.makingOffer = true;
-        this.options.onNegotiationNeeded(this.remoteId);
+        await this.options.onNegotiationNeeded(this.remoteId);
       } catch (err) {
-        console.error(`[PeerConnection:${this.remoteId}] Error on negotiationneeded:`, err);
+        console.error(`[PeerConnection:${this.remoteId}] Error during negotiationneeded:`, err);
       } finally {
         this.makingOffer = false;
       }
@@ -74,14 +79,16 @@ export class PeerConnection {
 
     // 2. ICE Candidates
     this.pc.onicecandidate = ({ candidate }) => {
-      if (candidate) {
+      if (candidate && !this.isClosed) {
         this.options.onIceCandidate(candidate.toJSON(), this.remoteId);
       }
     };
 
     // 3. Remote Tracks
-    this.pc.ontrack = ({ track, streams }) => {
-      const stream = streams[0] || this.remoteStream;
+    this.pc.ontrack = (event) => {
+      const track = event.track;
+      const stream = event.streams[0] || this.remoteStream;
+
       if (!this.remoteStream.getTracks().includes(track)) {
         this.remoteStream.addTrack(track);
       }
@@ -96,18 +103,36 @@ export class PeerConnection {
 
     // 4. Remote DataChannel
     this.pc.ondatachannel = (event) => {
+      console.log(`[PeerConnection:${this.remoteId}] ondatachannel event received:`, event.channel.label, 'readyState:', event.channel.readyState);
       this.dataChannel = event.channel;
       this.options.onDataChannel(event.channel, this.remoteId);
     };
 
     // 5. Connection State
     this.pc.onconnectionstatechange = () => {
+      if (this.isClosed) return;
       const state = this.pc.connectionState;
       this.options.onConnectionStateChange(state, this.remoteId);
 
       if (state === 'failed') {
         console.warn(`[PeerConnection:${this.remoteId}] ICE/DTLS failed. Initiating ICE restart.`);
-        this.pc.restartIce();
+        try {
+          this.pc.restartIce();
+        } catch (e) {
+          console.warn(`[PeerConnection:${this.remoteId}] restartIce failed:`, e);
+        }
+      }
+    };
+
+    // 6. ICE Connection State
+    this.pc.oniceconnectionstatechange = () => {
+      if (this.isClosed) return;
+      if (this.pc.iceConnectionState === 'failed') {
+        try {
+          this.pc.restartIce();
+        } catch {
+          // ignore
+        }
       }
     };
   }
@@ -124,39 +149,18 @@ export class PeerConnection {
   }
 
   /**
-   * Adds local media track for this peer connection without replacing distinct streams.
+   * Adds a local track associated with a specific stream.
    */
   public addTrack(track: MediaStreamTrack, stream: MediaStream): RTCRtpSender {
     const senders = this.pc.getSenders();
-    
+
     // Check if this exact track is already being sent
     const existingExactSender = senders.find((s) => s.track === track || s.track?.id === track.id);
     if (existingExactSender) {
       return existingExactSender;
     }
 
-    // Check if there is an empty/ended sender of the same kind that we can reuse
-    const reusableSender = senders.find(
-      (s) => !s.track || s.track.readyState === 'ended'
-    );
-    if (reusableSender) {
-      reusableSender.replaceTrack(track);
-      return reusableSender;
-    }
-
     return this.pc.addTrack(track, stream);
-  }
-
-  /**
-   * Replaces an existing track of same kind without renegotiation if possible.
-   */
-  public async replaceTrack(kind: 'audio' | 'video', newTrack: MediaStreamTrack | null): Promise<boolean> {
-    const sender = this.pc.getSenders().find((s) => s.track?.kind === kind);
-    if (sender) {
-      await sender.replaceTrack(newTrack);
-      return true;
-    }
-    return false;
   }
 
   /**
@@ -174,9 +178,11 @@ export class PeerConnection {
   }
 
   /**
-   * Synchronizes active local media streams (camera + screen share) with RTCRtpSenders.
+   * Synchronizes active local media streams (user media + screen share) with RTCRtpSenders.
    */
   public syncLocalTracks(userStream: MediaStream | null, screenStream: MediaStream | null): void {
+    if (this.isClosed) return;
+
     const activeTracks: { track: MediaStreamTrack; stream: MediaStream }[] = [];
 
     if (userStream) {
@@ -197,7 +203,7 @@ export class PeerConnection {
 
     const currentSenders = this.pc.getSenders();
 
-    // 1. Remove dead/stopped senders
+    // 1. Remove stopped/stale senders
     currentSenders.forEach((sender) => {
       if (!sender.track || sender.track.readyState === 'ended') {
         try {
@@ -206,7 +212,9 @@ export class PeerConnection {
           // ignore
         }
       } else {
-        const isStillActive = activeTracks.some((at) => at.track === sender.track || at.track.id === sender.track?.id);
+        const isStillActive = activeTracks.some(
+          (at) => at.track === sender.track || at.track.id === sender.track?.id
+        );
         if (!isStillActive) {
           try {
             this.pc.removeTrack(sender);
@@ -219,7 +227,16 @@ export class PeerConnection {
 
     // 2. Add newly active tracks
     activeTracks.forEach(({ track, stream }) => {
-      this.addTrack(track, stream);
+      const alreadySending = this.pc.getSenders().some(
+        (s) => s.track === track || s.track?.id === track.id
+      );
+      if (!alreadySending) {
+        try {
+          this.pc.addTrack(track, stream);
+        } catch (err) {
+          console.warn('[PeerConnection] Failed to add track:', err);
+        }
+      }
     });
   }
 
@@ -237,22 +254,25 @@ export class PeerConnection {
   }
 
   /**
-   * Handles incoming SDP Offer from remote peer.
+   * Handles incoming SDP Offer from remote peer following W3C Perfect Negotiation.
    */
   public async handleOffer(offer: RTCSessionDescriptionInit): Promise<RTCSessionDescriptionInit | null> {
-    const readyForOffer =
-      !this.makingOffer &&
-      (this.pc.signalingState === 'stable' || this.isSettingRemoteAnswerPending);
+    if (this.isClosed) return null;
 
-    const offerCollision = !readyForOffer;
+    const offerCollision =
+      this.makingOffer ||
+      this.pc.signalingState !== 'stable' ||
+      this.isSettingRemoteAnswerPending;
 
-    if (offerCollision) {
-      if (!this.isPolite) {
-        // Impolite peer ignores offer collision and keeps its own offer
-        this.ignoreOffer = true;
-        return null;
-      }
-      // Polite peer rolls back local offer to accept incoming offer
+    this.ignoreOffer = !this.isPolite && offerCollision;
+
+    if (this.ignoreOffer) {
+      console.warn(`[PeerConnection:${this.remoteId}] Impolite peer ignoring offer collision.`);
+      return null;
+    }
+
+    if (offerCollision && this.isPolite) {
+      // Polite peer rolls back local offer to accept incoming remote offer
       await Promise.all([
         this.pc.setLocalDescription({ type: 'rollback' }),
         this.pc.setRemoteDescription(offer),
@@ -273,6 +293,7 @@ export class PeerConnection {
    * Handles incoming SDP Answer from remote peer.
    */
   public async handleAnswer(answer: RTCSessionDescriptionInit): Promise<void> {
+    if (this.isClosed) return;
     this.isSettingRemoteAnswerPending = true;
     try {
       await this.pc.setRemoteDescription(answer);
@@ -286,6 +307,7 @@ export class PeerConnection {
    * Handles incoming ICE candidate with queueing support.
    */
   public async handleCandidate(candidateInit: RTCIceCandidateInit): Promise<void> {
+    if (this.isClosed) return;
     try {
       if (!this.pc.remoteDescription) {
         // Queue candidate until remote description is set
@@ -293,7 +315,7 @@ export class PeerConnection {
         return;
       }
 
-      await this.pc.addIceCandidate(new RTCIceCandidate(candidateInit));
+      await this.pc.addIceCandidate(candidateInit);
     } catch (err) {
       if (!this.ignoreOffer) {
         console.error(`[PeerConnection:${this.remoteId}] Error adding ICE candidate:`, err);
@@ -306,9 +328,11 @@ export class PeerConnection {
       const cand = this.queuedIceCandidates.shift();
       if (cand) {
         try {
-          await this.pc.addIceCandidate(new RTCIceCandidate(cand));
+          await this.pc.addIceCandidate(cand);
         } catch (err) {
-          console.warn(`[PeerConnection:${this.remoteId}] Failed to apply queued candidate:`, err);
+          if (!this.ignoreOffer) {
+            console.warn(`[PeerConnection:${this.remoteId}] Failed to apply queued candidate:`, err);
+          }
         }
       }
     }
@@ -319,6 +343,7 @@ export class PeerConnection {
   }
 
   public close(): void {
+    this.isClosed = true;
     try {
       if (this.dataChannel) {
         this.dataChannel.close();

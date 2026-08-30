@@ -152,6 +152,7 @@ export function VideoGrid({
       const targetPeer = peers.find((p) => p.nodeId === targetNodeId);
       if (!targetPeer) return null;
       const screenStream =
+        targetPeer.screenStream ||
         targetPeer.streams.find((s) =>
           s.getVideoTracks().some((t) => t === targetPeer.tracks.screen)
         ) || targetPeer.streams[0];
@@ -164,6 +165,7 @@ export function VideoGrid({
           deviceName={`${targetPeer.deviceName} (Tela)`}
           deviceType={targetPeer.deviceType}
           isScreenShare
+          hasScreenAudio={!!targetPeer.tracks.screenAudio}
           safetyNumber={targetPeer.safetyNumber}
           isMaximized={options.isMaximized}
           isSpotlight={options.isSpotlight}
@@ -181,7 +183,7 @@ export function VideoGrid({
       return (
         <VideoTile
           key={id}
-          stream={targetPeer.streams[0]}
+          stream={targetPeer.userStream || targetPeer.streams[0]}
           username={targetPeer.username}
           deviceName={targetPeer.deviceName}
           deviceType={targetPeer.deviceType}

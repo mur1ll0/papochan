@@ -27,7 +27,8 @@ export type SignalMessageType =
   | 'knock'
   | 'knock-approved'
   | 'knock-rejected'
-  | 'knock-cancel';
+  | 'knock-cancel'
+  | 'chat';
 
 export interface SignalEnvelope<T = any> {
   type: SignalMessageType;
@@ -58,6 +59,8 @@ export interface SignalingEvents {
   onKnockApproved: (approverId: string) => void;
   onKnockRejected: (rejectorId: string) => void;
   onKnockCancelled?: (senderId: string) => void;
+  onChatMessage?: (msg: any) => void;
+  onHostAssigned?: (isHost: boolean) => void;
   onError: (error: Error) => void;
   onConnectionStateChange: (state: 'connecting' | 'connected' | 'disconnected' | 'failed') => void;
 }
@@ -74,5 +77,6 @@ export abstract class SignalingClient {
   abstract sendKnockApproved(targetId: string): Promise<void>;
   abstract sendKnockRejected(targetId: string): Promise<void>;
   abstract sendKnockCancel(): Promise<void>;
+  abstract sendChatMessage(msg: any): Promise<void>;
   abstract setEventListeners(events: Partial<SignalingEvents>): void;
 }

@@ -59,14 +59,29 @@ export function VideoTile({
   className,
 }: VideoTileProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
   const [isHovered, setIsHovered] = useState(false);
   const [fitMode, setFitMode] = useState<'contain' | 'cover'>('contain');
 
   useEffect(() => {
     if (videoRef.current && stream) {
-      videoRef.current.srcObject = stream;
+      if (videoRef.current.srcObject !== stream) {
+        videoRef.current.srcObject = stream;
+      }
+      videoRef.current.play().catch(() => {});
     }
   }, [stream]);
+
+  useEffect(() => {
+    if (audioRef.current && stream && !isLocal) {
+      if (audioRef.current.srcObject !== stream) {
+        audioRef.current.srcObject = stream;
+      }
+      audioRef.current.play().catch((err) => {
+        console.warn('[VideoTile] Remote audio play caught:', err);
+      });
+    }
+  }, [stream, isLocal]);
 
   const isSpeaking = audioLevel > 15 && !isAudioMuted;
 
@@ -83,8 +98,18 @@ export function VideoTile({
         className
       )}
     >
+      {/* Dedicated Remote Audio Playback Element */}
+      {!isLocal && stream && (
+        <audio
+          ref={audioRef}
+          autoPlay
+          playsInline
+          className="hidden pointer-events-none"
+        />
+      )}
+
       {/* Video Element */}
-      {stream && (!isVideoMuted || isScreenShare) ? (
+      {stream && (
         <video
           ref={videoRef}
           autoPlay
@@ -93,12 +118,15 @@ export function VideoTile({
           className={cn(
             'w-full h-full transition-all duration-200',
             fitMode === 'cover' ? 'object-cover' : 'object-contain',
-            !isScreenShare && isLocal ? '-scale-x-100' : ''
+            !isScreenShare && isLocal ? '-scale-x-100' : '',
+            isVideoMuted && !isScreenShare ? 'hidden' : 'block'
           )}
         />
-      ) : (
-        /* Video Off Placeholder Avatar */
-        <div className="w-full h-full flex flex-col items-center justify-center p-6 bg-slate-950">
+      )}
+
+      {/* Video Off Placeholder Avatar */}
+      {(!stream || (isVideoMuted && !isScreenShare)) && (
+        <div className="w-full h-full flex flex-col items-center justify-center p-6 bg-slate-950 absolute inset-0">
           <div className="relative">
             <div
               className={cn(

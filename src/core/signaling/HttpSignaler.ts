@@ -59,6 +59,12 @@ export class HttpSignaler extends SignalingClient {
         throw new Error(`Signaling registration failed (${heartbeatRes.status})`);
       }
 
+      const heartbeatData = await heartbeatRes.json().catch(() => ({}));
+      if (heartbeatData.isHost || (heartbeatData.peersCount !== undefined && heartbeatData.peersCount <= 1)) {
+        this.isHost = true;
+        this.events.onHostAssigned?.(true);
+      }
+
       this.isConnected = true;
       this.events.onConnectionStateChange?.('connected');
 
@@ -187,6 +193,11 @@ export class HttpSignaler extends SignalingClient {
       const data = await res.json();
       if (data.serverTime) {
         this.lastPollTimestamp = Math.max(this.lastPollTimestamp, data.serverTime - 500);
+      }
+
+      if (data.hostId && data.hostId === clientId && !this.isHost) {
+        this.isHost = true;
+        this.events.onHostAssigned?.(true);
       }
 
       // Sync active peers
@@ -345,6 +356,14 @@ export class HttpSignaler extends SignalingClient {
         this.events.onKnockCancelled?.(envelope.senderId);
         break;
       }
+      case 'chat': {
+        this.events.onChatMessage?.(envelope.payload);
+        break;
+      }
     }
+  }
+
+  public async sendChatMessage(msg: any): Promise<void> {
+    await this.publishEnvelope('chat', msg);
   }
 }

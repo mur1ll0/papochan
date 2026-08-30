@@ -95,10 +95,12 @@ export class E2EEDataChannel {
     this.channel.binaryType = 'arraybuffer';
 
     this.channel.onopen = () => {
+      console.log('[E2EEDataChannel] Channel opened for peer:', this.localSenderId, 'label:', this.channel.label);
       this.events.onStatusChange?.(true);
     };
 
     this.channel.onclose = () => {
+      console.log('[E2EEDataChannel] Channel closed for peer:', this.localSenderId);
       this.events.onStatusChange?.(false);
     };
 
@@ -123,6 +125,7 @@ export class E2EEDataChannel {
               packet.envelope as EncryptedPacket,
               this.sessionKey
             );
+            console.log('[E2EEDataChannel] Successfully received & decrypted text message:', decryptedMsg);
             this.events.onMessage?.(decryptedMsg);
           } else if (packet.kind === 'typing') {
             const indicator = await decryptPayload<TypingIndicator>(
@@ -146,7 +149,7 @@ export class E2EEDataChannel {
    */
   public async sendTextMessage(text: string): Promise<ChatTextMessage> {
     if (!this.isOpen || !this.sessionKey) {
-      throw new Error('Data channel not open or encryption key unavailable');
+      throw new Error(`Data channel not open (state: ${this.channel.readyState}) or encryption key unavailable`);
     }
 
     const msg: ChatTextMessage = {
@@ -161,6 +164,7 @@ export class E2EEDataChannel {
     const encrypted = await encryptPayload(msg, this.sessionKey, this.localSenderId);
     const packet = JSON.stringify({ kind: 'text', envelope: encrypted });
 
+    console.log('[E2EEDataChannel] Sending encrypted message packet over data channel...');
     this.channel.send(packet);
     return msg;
   }
