@@ -7,7 +7,7 @@ import {
   CoPresenceUser,
 } from '@/core/webrtc/MeshManager';
 import { UniversalSignaler } from '@/core/signaling/UniversalSignaler';
-import { SignalingClient, DeviceMetadata } from '@/core/signaling/SignalingClient';
+import { SignalingClient, DeviceMetadata, KnockRequest } from '@/core/signaling/SignalingClient';
 import { MediaEngine } from '@/core/webrtc/MediaEngine';
 import {
   ChatTextMessage,
