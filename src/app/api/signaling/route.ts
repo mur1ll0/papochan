@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { checkRateLimit } from '@/lib/rateLimit';
 import { db } from '@/lib/db';
+import { getAblyRestClient } from '@/lib/ably';
 
 // In-Memory Signaling Bus Cache with TTL
 interface StoredSignal {
@@ -137,7 +138,7 @@ export async function POST(req: NextRequest) {
         senderId: envelope.senderId,
         targetId: envelope.targetId,
         envelope,
-        timestamp: envelope.timestamp || now,
+        timestamp: now,
       };
 
       // Push to memory cache
@@ -155,7 +156,7 @@ export async function POST(req: NextRequest) {
             senderId: envelope.senderId,
             targetId: envelope.targetId || null,
             envelope: envelope as any,
-            timestamp: BigInt(stored.timestamp),
+            timestamp: BigInt(now),
           },
         });
 
@@ -166,6 +167,17 @@ export async function POST(req: NextRequest) {
           .catch(() => {});
       } catch (dbErr) {
         console.warn('[Signaling:POST] DB message persist fallback to memory:', dbErr);
+      }
+
+      // Bridge envelope to Ably Realtime channel if configured
+      if (process.env.ABLY_API_KEY && !process.env.ABLY_API_KEY.includes('mock-ably-key')) {
+        try {
+          const ably = getAblyRestClient();
+          const channel = ably.channels.get(`ghost:room:${code}`);
+          channel.publish('signal', envelope).catch(() => {});
+        } catch (ablyErr) {
+          console.warn('[Signaling:POST] Ably bridge error:', ablyErr);
+        }
       }
 
       return NextResponse.json({ success: true, messageId: stored.id });

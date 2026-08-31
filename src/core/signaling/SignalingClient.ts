@@ -72,6 +72,7 @@ export abstract class SignalingClient {
   abstract sendAnswer(targetId: string, sdp: RTCSessionDescriptionInit): Promise<void>;
   abstract sendCandidate(targetId: string, candidate: RTCIceCandidateInit): Promise<void>;
   abstract sendRenegotiate(targetId: string): Promise<void>;
+  abstract sendPresenceAnnounce(): Promise<void>;
   abstract sendStateUpdate(capabilities: DeviceMetadata['capabilities']): Promise<void>;
   abstract sendKnock(): Promise<void>;
   abstract sendKnockApproved(targetId: string): Promise<void>;

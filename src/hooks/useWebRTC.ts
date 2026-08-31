@@ -183,6 +183,9 @@ export function useWebRTC({
             knockIntervalRef.current = null;
           }
           setAdmissionStatus('approved');
+          if (signalerRef.current) {
+            await signalerRef.current.sendPresenceAnnounce();
+          }
           if (meshManagerRef.current && mediaEngine) {
             await meshManagerRef.current.syncLocalTracks();
           }
@@ -321,8 +324,11 @@ export function useWebRTC({
     if (signalerRef.current) {
       await signalerRef.current.sendKnockApproved(senderId);
       setPendingKnocks((prev) => prev.filter((k) => k.senderId !== senderId));
+      if (meshManagerRef.current && mediaEngine) {
+        await meshManagerRef.current.syncLocalTracks();
+      }
     }
-  }, []);
+  }, [mediaEngine]);
 
   const rejectKnock = useCallback(async (senderId: string) => {
     if (signalerRef.current) {

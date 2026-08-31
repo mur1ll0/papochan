@@ -59,6 +59,25 @@ export function importPublicKey(base64Key: string): Uint8Array {
 }
 
 /**
+ * Deterministically serializes any JavaScript object or value into a canonical JSON string
+ * with alphabetically sorted keys. Ensures cryptographic signature verification never fails
+ * due to JSON object key reordering during network transit or database JSONB storage.
+ */
+export function canonicalJsonStringify(obj: any): string {
+  if (obj === null || typeof obj !== 'object') {
+    return JSON.stringify(obj);
+  }
+  if (Array.isArray(obj)) {
+    return '[' + obj.map(canonicalJsonStringify).join(',') + ']';
+  }
+  const sortedKeys = Object.keys(obj).sort();
+  const pairs = sortedKeys.map(
+    (key) => `${JSON.stringify(key)}:${canonicalJsonStringify(obj[key])}`
+  );
+  return '{' + pairs.join(',') + '}';
+}
+
+/**
  * Signs a payload with the device's private Ed25519 key.
  */
 export function signPayload(message: string | Uint8Array, secretKeyEd: Uint8Array): string {

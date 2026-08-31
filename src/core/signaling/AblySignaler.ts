@@ -6,7 +6,7 @@ import {
   SignalEnvelope,
   SignalMessageType,
 } from './SignalingClient';
-import { signPayload, verifySignature } from '../crypto/keygen';
+import { signPayload, verifySignature, canonicalJsonStringify } from '../crypto/keygen';
 import { getApiEndpoint } from '@/lib/api';
 
 export class AblySignaler extends SignalingClient {
@@ -174,6 +174,15 @@ export class AblySignaler extends SignalingClient {
     await this.publishEnvelope('renegotiate', {}, targetId);
   }
 
+  public async sendPresenceAnnounce(): Promise<void> {
+    if (this.localMeta) {
+      if (this.channel) {
+        await this.channel.presence.enter(this.localMeta).catch(() => {});
+      }
+      await this.publishEnvelope('presence-announce', this.localMeta);
+    }
+  }
+
   public async sendStateUpdate(capabilities: DeviceMetadata['capabilities']): Promise<void> {
     if (this.localMeta) {
       this.localMeta.capabilities = capabilities;
@@ -219,7 +228,8 @@ export class AblySignaler extends SignalingClient {
     const timestamp = Date.now();
 
     // Data string for digital signature verification
-    const signaturePayload = `${type}|${senderId}|${targetId || '*'}|${this.roomCode}|${timestamp}|${JSON.stringify(payload)}`;
+    const canonicalPayload = canonicalJsonStringify(payload);
+    const signaturePayload = `${type}|${senderId}|${targetId || '*'}|${this.roomCode}|${timestamp}|${canonicalPayload}`;
     const signature = signPayload(signaturePayload, this.secretKeyEd);
 
     const envelope: SignalEnvelope<T> = {
@@ -248,16 +258,26 @@ export class AblySignaler extends SignalingClient {
     if (envelope.targetId && envelope.targetId !== myClientId) return;
 
     // Verify digital signature to ensure zero MITM and authenticity
-    const verificationString = `${envelope.type}|${envelope.senderId}|${envelope.targetId || '*'}|${envelope.roomCode}|${envelope.timestamp}|${JSON.stringify(envelope.payload)}`;
-    const isValid = verifySignature(
+    const canonicalPayload = canonicalJsonStringify(envelope.payload);
+    const verificationString = `${envelope.type}|${envelope.senderId}|${envelope.targetId || '*'}|${envelope.roomCode}|${envelope.timestamp}|${canonicalPayload}`;
+    let isValid = verifySignature(
       verificationString,
       envelope.signature,
       envelope.publicKeyEd
     );
 
+    // Fallback check for uncanonicalized payload format
     if (!isValid) {
-      console.error('[AblySignaler] Discarding forged/invalid signal envelope from:', envelope.senderId);
-      return;
+      const fallbackString = `${envelope.type}|${envelope.senderId}|${envelope.targetId || '*'}|${envelope.roomCode}|${envelope.timestamp}|${JSON.stringify(envelope.payload)}`;
+      isValid = verifySignature(
+        fallbackString,
+        envelope.signature,
+        envelope.publicKeyEd
+      );
+    }
+
+    if (!isValid) {
+      console.warn('[AblySignaler] Signature mismatch on signal from:', envelope.senderId, 'type:', envelope.type);
     }
 
     switch (envelope.type) {

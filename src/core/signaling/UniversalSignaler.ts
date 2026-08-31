@@ -100,6 +100,10 @@ export class UniversalSignaler extends SignalingClient {
     await this.activeSignaler.sendRenegotiate(targetId);
   }
 
+  public async sendPresenceAnnounce(): Promise<void> {
+    await this.activeSignaler.sendPresenceAnnounce();
+  }
+
   public async sendStateUpdate(capabilities: DeviceMetadata['capabilities']): Promise<void> {
     await this.activeSignaler.sendStateUpdate(capabilities);
   }

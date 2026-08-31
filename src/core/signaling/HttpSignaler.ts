@@ -5,7 +5,7 @@ import {
   SignalEnvelope,
   SignalMessageType,
 } from './SignalingClient';
-import { signPayload, verifySignature } from '../crypto/keygen';
+import { signPayload, verifySignature, canonicalJsonStringify } from '../crypto/keygen';
 import { getApiEndpoint } from '@/lib/api';
 
 export class HttpSignaler extends SignalingClient {
@@ -14,6 +14,7 @@ export class HttpSignaler extends SignalingClient {
   private secretKeyEd: Uint8Array | null = null;
   private events: Partial<SignalingEvents> = {};
   private knownPeers = new Map<string, DeviceMetadata>();
+  private processedSignatures = new Set<string>();
 
   private pollInterval: NodeJS.Timeout | null = null;
   private heartbeatInterval: NodeJS.Timeout | null = null;
@@ -38,7 +39,8 @@ export class HttpSignaler extends SignalingClient {
     this.roomCode = roomCode.toUpperCase();
     this.localMeta = localMeta;
     this.secretKeyEd = secretKeyEd;
-    this.lastPollTimestamp = Date.now() - 5000;
+    this.lastPollTimestamp = Date.now() - 10000;
+    this.processedSignatures.clear();
 
     this.events.onConnectionStateChange?.('connecting');
 
@@ -68,10 +70,10 @@ export class HttpSignaler extends SignalingClient {
       this.isConnected = true;
       this.events.onConnectionStateChange?.('connected');
 
-      // 2. Start fast message polling (every 400ms)
+      // 2. Start fast message polling (every 350ms)
       this.pollInterval = setInterval(() => {
         this.pollMessages();
-      }, 400);
+      }, 350);
 
       // 3. Start presence heartbeat (every 5 seconds)
       this.heartbeatInterval = setInterval(() => {
@@ -94,6 +96,7 @@ export class HttpSignaler extends SignalingClient {
     if (this.heartbeatInterval) clearInterval(this.heartbeatInterval);
     this.pollInterval = null;
     this.heartbeatInterval = null;
+    this.processedSignatures.clear();
 
     if (this.localMeta && this.roomCode) {
       try {
@@ -107,11 +110,10 @@ export class HttpSignaler extends SignalingClient {
           }),
         });
       } catch {
-        // ignore
+        // ignore disconnect fetch failure
       }
     }
 
-    this.knownPeers.clear();
     this.events.onConnectionStateChange?.('disconnected');
   }
 
@@ -129,6 +131,12 @@ export class HttpSignaler extends SignalingClient {
 
   public async sendRenegotiate(targetId: string): Promise<void> {
     await this.publishEnvelope('renegotiate', {}, targetId);
+  }
+
+  public async sendPresenceAnnounce(): Promise<void> {
+    if (this.localMeta) {
+      await this.publishEnvelope('presence-announce', this.localMeta);
+    }
   }
 
   public async sendStateUpdate(capabilities: DeviceMetadata['capabilities']): Promise<void> {
@@ -192,7 +200,8 @@ export class HttpSignaler extends SignalingClient {
 
       const data = await res.json();
       if (data.serverTime) {
-        this.lastPollTimestamp = Math.max(this.lastPollTimestamp, data.serverTime - 500);
+        // Keep a 4-second safety overlap window against clock skew
+        this.lastPollTimestamp = Math.max(0, data.serverTime - 4000);
       }
 
       if (data.hostId && data.hostId === clientId && !this.isHost) {
@@ -221,9 +230,18 @@ export class HttpSignaler extends SignalingClient {
         }
       }
 
-      // Process incoming envelopes
+      // Process incoming envelopes with deduplication
       if (Array.isArray(data.messages)) {
         for (const envelope of data.messages) {
+          const sigKey = envelope.signature || `${envelope.senderId}-${envelope.timestamp}-${envelope.type}`;
+          if (this.processedSignatures.has(sigKey)) {
+            continue;
+          }
+          this.processedSignatures.add(sigKey);
+          if (this.processedSignatures.size > 2000) {
+            const first = this.processedSignatures.values().next().value;
+            if (first) this.processedSignatures.delete(first);
+          }
           this.handleIncomingSignal(envelope);
         }
       }
@@ -242,7 +260,8 @@ export class HttpSignaler extends SignalingClient {
     const senderId = `${this.localMeta.userId}:${this.localMeta.deviceId}`;
     const timestamp = Date.now();
 
-    const signaturePayload = `${type}|${senderId}|${targetId || '*'}|${this.roomCode}|${timestamp}|${JSON.stringify(payload)}`;
+    const canonicalPayload = canonicalJsonStringify(payload);
+    const signaturePayload = `${type}|${senderId}|${targetId || '*'}|${this.roomCode}|${timestamp}|${canonicalPayload}`;
     const signature = signPayload(signaturePayload, this.secretKeyEd);
 
     const envelope: SignalEnvelope<T> = {
@@ -255,6 +274,9 @@ export class HttpSignaler extends SignalingClient {
       publicKeyEd: this.localMeta.publicKeyEd,
       signature,
     };
+
+    // Mark self-published envelope as processed
+    this.processedSignatures.add(signature);
 
     try {
       await fetch(getApiEndpoint('/api/signaling'), {
@@ -277,16 +299,26 @@ export class HttpSignaler extends SignalingClient {
     if (envelope.senderId === myClientId) return;
     if (envelope.targetId && envelope.targetId !== myClientId) return;
 
-    const verificationString = `${envelope.type}|${envelope.senderId}|${envelope.targetId || '*'}|${envelope.roomCode}|${envelope.timestamp}|${JSON.stringify(envelope.payload)}`;
-    const isValid = verifySignature(
+    const canonicalPayload = canonicalJsonStringify(envelope.payload);
+    const verificationString = `${envelope.type}|${envelope.senderId}|${envelope.targetId || '*'}|${envelope.roomCode}|${envelope.timestamp}|${canonicalPayload}`;
+    let isValid = verifySignature(
       verificationString,
       envelope.signature,
       envelope.publicKeyEd
     );
 
+    // Fallback check for uncanonicalized payload format
     if (!isValid) {
-      console.error('[HttpSignaler] Discarding forged/invalid signal from:', envelope.senderId);
-      return;
+      const fallbackString = `${envelope.type}|${envelope.senderId}|${envelope.targetId || '*'}|${envelope.roomCode}|${envelope.timestamp}|${JSON.stringify(envelope.payload)}`;
+      isValid = verifySignature(
+        fallbackString,
+        envelope.signature,
+        envelope.publicKeyEd
+      );
+    }
+
+    if (!isValid) {
+      console.warn('[HttpSignaler] Signature mismatch on signal from:', envelope.senderId, 'type:', envelope.type);
     }
 
     switch (envelope.type) {
