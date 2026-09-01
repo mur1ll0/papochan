@@ -474,10 +474,50 @@ export class MediaEngine {
     if (videoTrack) {
       videoTrack.enabled = !videoTrack.enabled;
       this.isVideoMuted = !videoTrack.enabled;
+      if (this.processedUserStream) {
+        const procVideo = this.processedUserStream.getVideoTracks()[0];
+        if (procVideo) procVideo.enabled = videoTrack.enabled;
+      }
       return videoTrack.enabled;
     }
 
     return false;
+  }
+
+  public async resumeAudio(): Promise<void> {
+    if (this.audioContext && this.audioContext.state === 'suspended') {
+      try {
+        await this.audioContext.resume();
+      } catch {
+        // ignore
+      }
+    }
+  }
+
+  public getTrackMap(): {
+    userAudioTrackId?: string;
+    userVideoTrackId?: string;
+    screenVideoTrackId?: string;
+    screenAudioTrackId?: string;
+    userStreamId?: string;
+    screenStreamId?: string;
+  } {
+    const userStream = this.getUserStream();
+    const screenStream = this.screenStream;
+
+    const userAudioTrack = userStream?.getAudioTracks().find((t) => t.readyState === 'live');
+    const userVideoTrack = userStream?.getVideoTracks().find((t) => t.readyState === 'live');
+    const screenVideoTrack = screenStream?.getVideoTracks().find((t) => t.readyState === 'live');
+    const screenAudioTrack = screenStream?.getAudioTracks().find((t) => t.readyState === 'live');
+
+    return {
+      userAudioTrackId: userAudioTrack?.id,
+      userVideoTrackId: userVideoTrack?.id,
+      screenVideoTrackId: screenVideoTrack?.id,
+      screenAudioTrackId: screenAudioTrack?.id,
+      userStreamId: userStream?.id,
+      screenStreamId: screenStream?.id,
+    };
   }
 
   public setDeviceConfig(config: Partial<MediaEngineConfig>): void {

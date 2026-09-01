@@ -73,6 +73,7 @@ export function useWebRTC({
           hasAudio: mediaEngine ? !mediaEngine.isAudioMuted : false,
           hasVideo: mediaEngine ? !mediaEngine.isVideoMuted : false,
           hasScreenShare: mediaEngine ? mediaEngine.isScreenSharing : false,
+          trackMap: mediaEngine ? mediaEngine.getTrackMap() : undefined,
         },
       };
 
@@ -84,7 +85,9 @@ export function useWebRTC({
       signalerRef.current = signaler;
 
       // Custom ICE servers if configured in env
-      const stunServersStr = process.env.NEXT_PUBLIC_STUN_SERVERS || 'stun:stun.l.google.com:19302,stun:stun1.l.google.com:19302';
+      const stunServersStr =
+        process.env.NEXT_PUBLIC_STUN_SERVERS ||
+        'stun:stun.l.google.com:19302,stun:stun1.l.google.com:19302,stun:stun2.l.google.com:19302,stun:stun.cloudflare.com:3478,stun:stun.services.mozilla.com';
       const iceServers: RTCIceServer[] = stunServersStr
         .split(',')
         .map((url) => ({ urls: url.trim() }));

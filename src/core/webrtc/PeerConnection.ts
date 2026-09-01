@@ -185,58 +185,70 @@ export class PeerConnection {
   public syncLocalTracks(userStream: MediaStream | null, screenStream: MediaStream | null): void {
     if (this.isClosed) return;
 
-    const activeTracks: { track: MediaStreamTrack; stream: MediaStream }[] = [];
-
-    if (userStream) {
-      userStream.getTracks().forEach((t) => {
-        if (t.readyState === 'live') {
-          activeTracks.push({ track: t, stream: userStream });
-        }
-      });
-    }
-
-    if (screenStream) {
-      screenStream.getTracks().forEach((t) => {
-        if (t.readyState === 'live') {
-          activeTracks.push({ track: t, stream: screenStream });
-        }
-      });
-    }
+    const activeUserTracks: MediaStreamTrack[] = userStream
+      ? userStream.getTracks().filter((t) => t.readyState === 'live')
+      : [];
+    const activeScreenTracks: MediaStreamTrack[] = screenStream
+      ? screenStream.getTracks().filter((t) => t.readyState === 'live')
+      : [];
 
     const currentSenders = this.pc.getSenders();
 
-    // 1. Remove stopped/stale senders
-    currentSenders.forEach((sender) => {
-      if (!sender.track || sender.track.readyState === 'ended') {
-        try {
-          this.pc.removeTrack(sender);
-        } catch {
-          // ignore
-        }
-      } else {
-        const isStillActive = activeTracks.some(
-          (at) => at.track === sender.track || at.track.id === sender.track?.id
-        );
-        if (!isStillActive) {
+    // 1. User Stream Audio / Video Tracks
+    activeUserTracks.forEach((track) => {
+      const exactSender = currentSenders.find((s) => s.track === track || s.track?.id === track.id);
+      if (exactSender) {
+        return;
+      }
+
+      // Check if there is an existing sender of the same kind that was sending a previous user track
+      const existingKindSender = currentSenders.find(
+        (s) => s.track && s.track.kind === track.kind && !activeScreenTracks.includes(s.track)
+      );
+
+      if (existingKindSender && typeof existingKindSender.replaceTrack === 'function') {
+        existingKindSender.replaceTrack(track).catch((err) => {
+          console.warn('[PeerConnection] replaceTrack failed, adding track:', err);
           try {
-            this.pc.removeTrack(sender);
-          } catch {
-            // ignore
+            if (userStream) this.pc.addTrack(track, userStream);
+          } catch {}
+        });
+      } else {
+        try {
+          if (userStream) {
+            this.pc.addTrack(track, userStream);
           }
+        } catch (err) {
+          console.warn('[PeerConnection] Failed to add user track:', err);
         }
       }
     });
 
-    // 2. Add newly active tracks
-    activeTracks.forEach(({ track, stream }) => {
-      const alreadySending = this.pc.getSenders().some(
-        (s) => s.track === track || s.track?.id === track.id
-      );
-      if (!alreadySending) {
+    // 2. Screen Stream Tracks (Screen Video + Screen Audio)
+    activeScreenTracks.forEach((track) => {
+      const alreadySending = currentSenders.some((s) => s.track === track || s.track?.id === track.id);
+      if (!alreadySending && screenStream) {
         try {
-          this.pc.addTrack(track, stream);
+          this.pc.addTrack(track, screenStream);
         } catch (err) {
-          console.warn('[PeerConnection] Failed to add track:', err);
+          console.warn('[PeerConnection] Failed to add screen track:', err);
+        }
+      }
+    });
+
+    // 3. Remove stopped senders or screen senders when screen sharing ended
+    currentSenders.forEach((sender) => {
+      if (!sender.track || sender.track.readyState === 'ended') {
+        try {
+          this.pc.removeTrack(sender);
+        } catch {}
+      } else {
+        const isUserTrack = activeUserTracks.some((t) => t === sender.track || t.id === sender.track?.id);
+        const isScreenTrack = activeScreenTracks.some((t) => t === sender.track || t.id === sender.track?.id);
+        if (!isUserTrack && !isScreenTrack) {
+          try {
+            this.pc.removeTrack(sender);
+          } catch {}
         }
       }
     });

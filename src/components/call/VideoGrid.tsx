@@ -49,7 +49,11 @@ export function VideoGrid({
 }: VideoGridProps) {
   // Identify active screen shares
   const remoteScreenPeers = peers.filter(
-    (p) => p.tracks.screen || p.capabilities.hasScreenShare
+    (p) =>
+      p.isScreenActive ||
+      !!p.tracks.screen ||
+      !!p.capabilities.hasScreenShare ||
+      (p.screenStream && p.screenStream.getVideoTracks().some((t) => t.readyState === 'live'))
   );
   const hasAnyScreenShare = isLocalScreenSharing || remoteScreenPeers.length > 0;
 
@@ -152,10 +156,16 @@ export function VideoGrid({
       const targetPeer = peers.find((p) => p.nodeId === targetNodeId);
       if (!targetPeer) return null;
       const screenStream =
-        targetPeer.screenStream ||
+        (targetPeer.screenStream && targetPeer.screenStream.getTracks().length > 0 ? targetPeer.screenStream : null) ||
         targetPeer.streams.find((s) =>
-          s.getVideoTracks().some((t) => t === targetPeer.tracks.screen)
-        ) || targetPeer.streams[0];
+          s.getVideoTracks().some(
+            (t) =>
+              t === targetPeer.tracks.screen ||
+              t.id === targetPeer.capabilities?.trackMap?.screenVideoTrackId
+          )
+        ) ||
+        targetPeer.screenStream ||
+        targetPeer.streams[0];
 
       return (
         <VideoTile
@@ -165,7 +175,10 @@ export function VideoGrid({
           deviceName={`${targetPeer.deviceName} (Tela)`}
           deviceType={targetPeer.deviceType}
           isScreenShare
-          hasScreenAudio={!!targetPeer.tracks.screenAudio}
+          hasScreenAudio={
+            !!targetPeer.tracks.screenAudio ||
+            !!targetPeer.capabilities?.trackMap?.screenAudioTrackId
+          }
           safetyNumber={targetPeer.safetyNumber}
           isMaximized={options.isMaximized}
           isSpotlight={options.isSpotlight}
@@ -208,7 +221,12 @@ export function VideoGrid({
   allStreamIds.push('local-cam');
   peers.forEach((p) => {
     allStreamIds.push(`peer-${p.nodeId}`);
-    if (p.tracks.screen || p.capabilities.hasScreenShare) {
+    if (
+      p.isScreenActive ||
+      p.tracks.screen ||
+      p.capabilities.hasScreenShare ||
+      (p.screenStream && p.screenStream.getVideoTracks().some((t) => t.readyState === 'live'))
+    ) {
       allStreamIds.push(`remote-screen-${p.nodeId}`);
     }
   });

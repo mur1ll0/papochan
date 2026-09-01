@@ -21,6 +21,7 @@ export function useMediaDevices(options: UseMediaDevicesOptions = {}) {
   } = options;
 
   const engineRef = useRef<MediaEngine | null>(null);
+  const [engine, setEngine] = useState<MediaEngine | null>(null);
   const [userStream, setUserStream] = useState<MediaStream | null>(null);
   const [screenStream, setScreenStream] = useState<MediaStream | null>(null);
   const [isAudioMuted, setIsAudioMuted] = useState<boolean>(!initialAudio);
@@ -57,27 +58,28 @@ export function useMediaDevices(options: UseMediaDevicesOptions = {}) {
 
   // Instantiate MediaEngine singleton
   useEffect(() => {
-    const engine = new MediaEngine({
+    const mediaEngine = new MediaEngine({
       audioDeviceId: selectedAudioDevice || undefined,
       videoDeviceId: selectedVideoDevice || undefined,
       audioOutputId: selectedAudioOutput || undefined,
       noiseSuppressionMode: initialNoiseSuppression,
     });
-    engineRef.current = engine;
+    engineRef.current = mediaEngine;
+    setEngine(mediaEngine);
 
-    engine.onVolume((vol) => {
+    mediaEngine.onVolume((vol) => {
       setAudioLevel(vol);
     });
 
-    engine.onDiagnostics((metrics) => {
+    mediaEngine.onDiagnostics((metrics) => {
       setAudioDiagnostics(metrics);
     });
 
-    engine.onDeviceChange((updatedDevices) => {
+    mediaEngine.onDeviceChange((updatedDevices) => {
       setDevices(updatedDevices);
     });
 
-    engine.onScreenShareEnded(() => {
+    mediaEngine.onScreenShareEnded(() => {
       setScreenStream(null);
       setIsScreenSharing(false);
       setHasScreenAudio(false);
@@ -88,7 +90,7 @@ export function useMediaDevices(options: UseMediaDevicesOptions = {}) {
     refreshDevices();
 
     if (autoStart) {
-      engine
+      mediaEngine
         .startUserMedia(initialAudio, initialVideo)
         .then((stream) => {
           setUserStream(stream);
@@ -102,7 +104,7 @@ export function useMediaDevices(options: UseMediaDevicesOptions = {}) {
     }
 
     return () => {
-      engine.destroy();
+      mediaEngine.destroy();
     };
   }, []);
 
@@ -230,7 +232,7 @@ export function useMediaDevices(options: UseMediaDevicesOptions = {}) {
   );
 
   return {
-    engine: engineRef.current,
+    engine: engine || engineRef.current,
     userStream,
     screenStream,
     isAudioMuted,

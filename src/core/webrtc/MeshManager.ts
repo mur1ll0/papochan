@@ -1,4 +1,4 @@
-import { DeviceMetadata, SignalingClient } from '../signaling/SignalingClient';
+import { DeviceMetadata, SignalingClient, TrackMap } from '../signaling/SignalingClient';
 import { PeerConnection } from './PeerConnection';
 import { MediaEngine } from './MediaEngine';
 import {
@@ -35,6 +35,7 @@ export interface RemotePeerNode {
     hasAudio: boolean;
     hasVideo: boolean;
     hasScreenShare: boolean;
+    trackMap?: TrackMap;
   };
   isAudioActive?: boolean;
   isVideoActive?: boolean;
@@ -150,6 +151,17 @@ export class MeshManager {
         const node = this.peerNodes.get(senderId);
         if (node) {
           node.capabilities = capabilities;
+          node.isAudioActive = capabilities.hasAudio ?? node.isAudioActive;
+          node.isVideoActive = capabilities.hasVideo ?? node.isVideoActive;
+          node.isScreenActive = capabilities.hasScreenShare ?? node.isScreenActive;
+
+          if (!capabilities.hasScreenShare) {
+            node.isScreenActive = false;
+            node.tracks.screen = undefined;
+            node.tracks.screenAudio = undefined;
+            node.screenStream = new MediaStream();
+          }
+
           this.emitPeersChange();
         }
       },
@@ -300,17 +312,21 @@ export class MeshManager {
   private attachLocalTracksToPeer(peer: PeerConnection): void {
     if (!this.mediaEngine) return;
 
-    const userStream = this.mediaEngine.getRawUserStream() || this.mediaEngine.getUserStream();
+    const userStream = this.mediaEngine.getUserStream();
     if (userStream) {
       userStream.getTracks().forEach((track) => {
-        peer.addTrack(track, userStream);
+        if (track.readyState === 'live') {
+          peer.addTrack(track, userStream);
+        }
       });
     }
 
     const screenStream = this.mediaEngine.getScreenStream();
     if (screenStream) {
       screenStream.getTracks().forEach((track) => {
-        peer.addTrack(track, screenStream);
+        if (track.readyState === 'live') {
+          peer.addTrack(track, screenStream);
+        }
       });
     }
   }
@@ -321,20 +337,24 @@ export class MeshManager {
   public async syncLocalTracks(): Promise<void> {
     if (!this.mediaEngine) return;
 
-    const userStream = this.mediaEngine.getRawUserStream() || this.mediaEngine.getUserStream();
+    const userStream = this.mediaEngine.getUserStream();
     const screenStream = this.mediaEngine.getScreenStream();
+    const trackMap = this.mediaEngine.getTrackMap();
 
     const capabilities = {
-      hasAudio: !this.mediaEngine.isAudioMuted && !!userStream?.getAudioTracks().length,
-      hasVideo: !this.mediaEngine.isVideoMuted && !!userStream?.getVideoTracks().length,
-      hasScreenShare: this.mediaEngine.isScreenSharing && !!screenStream?.getVideoTracks().length,
+      hasAudio: !this.mediaEngine.isAudioMuted && !!userStream?.getAudioTracks().some((t) => t.readyState === 'live'),
+      hasVideo: !this.mediaEngine.isVideoMuted && !!userStream?.getVideoTracks().some((t) => t.readyState === 'live'),
+      hasScreenShare: this.mediaEngine.isScreenSharing && !!screenStream?.getVideoTracks().some((t) => t.readyState === 'live'),
+      trackMap,
     };
+
+    this.localMeta.capabilities = capabilities;
 
     // Update signaling presence capabilities
     await this.signaler.sendStateUpdate(capabilities);
 
     // Apply to all peer connections
-    for (const [peerId, peer] of this.peers.entries()) {
+    for (const [, peer] of this.peers.entries()) {
       peer.syncLocalTracks(userStream, screenStream);
     }
   }
@@ -347,39 +367,72 @@ export class MeshManager {
       node.streams.push(stream);
     }
 
-    const isScreenTrack =
-      stream.id.includes('screen') ||
-      track.label.toLowerCase().includes('screen') ||
-      track.label.toLowerCase().includes('display') ||
-      track.label.toLowerCase().includes('window') ||
-      (track.kind === 'video' && node.tracks.video && node.tracks.video !== track);
+    const trackMap = node.capabilities?.trackMap;
+    let isScreenTrack = false;
+
+    if (trackMap) {
+      if (track.id === trackMap.screenVideoTrackId || track.id === trackMap.screenAudioTrackId) {
+        isScreenTrack = true;
+      } else if (track.id === trackMap.userVideoTrackId || track.id === trackMap.userAudioTrackId) {
+        isScreenTrack = false;
+      } else if (trackMap.screenStreamId && stream.id === trackMap.screenStreamId) {
+        isScreenTrack = true;
+      } else if (trackMap.userStreamId && stream.id === trackMap.userStreamId) {
+        isScreenTrack = false;
+      }
+    }
+
+    // Fallback heuristic if trackMap not available
+    if (!trackMap || (!trackMap.screenVideoTrackId && !trackMap.userVideoTrackId)) {
+      const isScreenLabel =
+        track.label.toLowerCase().includes('screen') ||
+        track.label.toLowerCase().includes('display') ||
+        track.label.toLowerCase().includes('window') ||
+        stream.id.toLowerCase().includes('screen');
+
+      if (track.kind === 'video') {
+        if (isScreenLabel) {
+          isScreenTrack = true;
+        } else if (node.capabilities?.hasScreenShare && !node.capabilities?.hasVideo) {
+          isScreenTrack = true;
+        } else if (node.tracks.video && node.tracks.video !== track && track.readyState === 'live') {
+          isScreenTrack = true;
+        }
+      } else if (track.kind === 'audio') {
+        if (isScreenLabel) {
+          isScreenTrack = true;
+        } else if (node.tracks.audio && node.tracks.audio !== track && track.readyState === 'live') {
+          isScreenTrack = true;
+        }
+      }
+    }
 
     if (track.kind === 'audio') {
       if (isScreenTrack) {
         node.tracks.screenAudio = track;
-        if (!node.screenStream.getTracks().includes(track)) {
-          node.screenStream.addTrack(track);
-        }
+        const currentTracks = node.screenStream.getTracks().filter((t) => t.kind !== 'audio');
+        currentTracks.push(track);
+        node.screenStream = new MediaStream(currentTracks);
       } else {
         node.tracks.audio = track;
-        node.isAudioActive = true;
-        if (!node.userStream.getTracks().includes(track)) {
-          node.userStream.addTrack(track);
-        }
+        node.isAudioActive = node.capabilities?.hasAudio ?? true;
+        const currentTracks = node.userStream.getTracks().filter((t) => t.kind !== 'audio');
+        currentTracks.push(track);
+        node.userStream = new MediaStream(currentTracks);
       }
     } else if (track.kind === 'video') {
       if (isScreenTrack) {
         node.tracks.screen = track;
         node.isScreenActive = true;
-        if (!node.screenStream.getTracks().includes(track)) {
-          node.screenStream.addTrack(track);
-        }
+        const currentTracks = node.screenStream.getTracks().filter((t) => t.kind !== 'video');
+        currentTracks.push(track);
+        node.screenStream = new MediaStream(currentTracks);
       } else {
         node.tracks.video = track;
-        node.isVideoActive = true;
-        if (!node.userStream.getTracks().includes(track)) {
-          node.userStream.addTrack(track);
-        }
+        node.isVideoActive = node.capabilities?.hasVideo ?? true;
+        const currentTracks = node.userStream.getTracks().filter((t) => t.kind !== 'video');
+        currentTracks.push(track);
+        node.userStream = new MediaStream(currentTracks);
       }
     }
 
@@ -392,10 +445,12 @@ export class MeshManager {
     if (!node) return;
 
     if (node.userStream.getTracks().includes(track)) {
-      node.userStream.removeTrack(track);
+      const remaining = node.userStream.getTracks().filter((t) => t !== track);
+      node.userStream = new MediaStream(remaining);
     }
     if (node.screenStream.getTracks().includes(track)) {
-      node.screenStream.removeTrack(track);
+      const remaining = node.screenStream.getTracks().filter((t) => t !== track);
+      node.screenStream = new MediaStream(remaining);
     }
 
     if (track.kind === 'audio') {

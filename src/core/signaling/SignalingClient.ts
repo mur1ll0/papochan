@@ -1,5 +1,14 @@
 export type DeviceType = 'desktop' | 'mobile' | 'browser';
 
+export interface TrackMap {
+  userAudioTrackId?: string;
+  userVideoTrackId?: string;
+  screenVideoTrackId?: string;
+  screenAudioTrackId?: string;
+  userStreamId?: string;
+  screenStreamId?: string;
+}
+
 export interface DeviceMetadata {
   deviceId: string;
   deviceName: string;
@@ -12,6 +21,7 @@ export interface DeviceMetadata {
     hasAudio: boolean;
     hasVideo: boolean;
     hasScreenShare: boolean;
+    trackMap?: TrackMap;
   };
 }
 

@@ -48,7 +48,7 @@ function getOrCreateMemoryRoom(roomCode: string): RoomState {
 }
 
 export async function POST(req: NextRequest) {
-  const rateLimit = checkRateLimit(req, 240, 60000, 'signaling-post');
+  const rateLimit = checkRateLimit(req, 1200, 60000, 'signaling-post');
   if (!rateLimit.success) {
     return NextResponse.json(
       { error: 'Rate limit exceeded' },

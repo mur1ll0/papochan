@@ -64,25 +64,59 @@ export function VideoTile({
   const [fitMode, setFitMode] = useState<'contain' | 'cover'>('contain');
 
   useEffect(() => {
-    if (videoRef.current && stream) {
-      if (videoRef.current.srcObject !== stream) {
-        videoRef.current.srcObject = stream;
-      }
-      videoRef.current.play().catch(() => {});
+    const videoEl = videoRef.current;
+    if (!videoEl || !stream) return;
+
+    if (videoEl.srcObject !== stream) {
+      videoEl.srcObject = stream;
     }
+    videoEl.play().catch(() => {});
+
+    const handleTrackEvent = () => {
+      if (videoEl.srcObject !== stream) {
+        videoEl.srcObject = stream;
+      }
+      videoEl.play().catch(() => {});
+    };
+
+    stream.addEventListener('addtrack', handleTrackEvent);
+    stream.addEventListener('removetrack', handleTrackEvent);
+
+    return () => {
+      stream.removeEventListener('addtrack', handleTrackEvent);
+      stream.removeEventListener('removetrack', handleTrackEvent);
+    };
   }, [stream]);
 
   useEffect(() => {
-    if (audioRef.current && stream && !isLocal) {
-      if (audioRef.current.srcObject !== stream) {
-        audioRef.current.srcObject = stream;
-      }
-      audioRef.current.play().catch((err) => {
-        console.warn('[VideoTile] Remote audio play caught:', err);
-      });
+    const audioEl = audioRef.current;
+    if (!audioEl || !stream || isLocal) return;
+
+    if (audioEl.srcObject !== stream) {
+      audioEl.srcObject = stream;
     }
+    audioEl.play().catch((err) => {
+      console.warn('[VideoTile] Remote audio play caught:', err);
+    });
+
+    const handleTrackEvent = () => {
+      if (audioEl.srcObject !== stream) {
+        audioEl.srcObject = stream;
+      }
+      audioEl.play().catch(() => {});
+    };
+
+    stream.addEventListener('addtrack', handleTrackEvent);
+    stream.addEventListener('removetrack', handleTrackEvent);
+
+    return () => {
+      stream.removeEventListener('addtrack', handleTrackEvent);
+      stream.removeEventListener('removetrack', handleTrackEvent);
+    };
   }, [stream, isLocal]);
 
+  const hasLiveVideoTrack = stream ? stream.getVideoTracks().some((t) => t.readyState === 'live') : false;
+  const isVideoVisible = isScreenShare ? hasLiveVideoTrack || !!stream : !isVideoMuted && (isLocal || hasLiveVideoTrack);
   const isSpeaking = audioLevel > 15 && !isAudioMuted;
 
   return (
@@ -119,13 +153,13 @@ export function VideoTile({
             'w-full h-full transition-all duration-200',
             fitMode === 'cover' ? 'object-cover' : 'object-contain',
             !isScreenShare && isLocal ? '-scale-x-100' : '',
-            isVideoMuted && !isScreenShare ? 'hidden' : 'block'
+            !isVideoVisible ? 'hidden' : 'block'
           )}
         />
       )}
 
       {/* Video Off Placeholder Avatar */}
-      {(!stream || (isVideoMuted && !isScreenShare)) && (
+      {(!stream || !isVideoVisible) && (
         <div className="w-full h-full flex flex-col items-center justify-center p-6 bg-slate-950 absolute inset-0">
           <div className="relative">
             <div
