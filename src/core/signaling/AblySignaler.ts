@@ -204,7 +204,13 @@ export class AblySignaler extends SignalingClient {
   }
 
   public async sendKnockApproved(targetId: string): Promise<void> {
-    await this.publishEnvelope('knock-approved', { approved: true, approver: this.localMeta }, targetId);
+    // Broadcast: in a mesh every member has to learn who was let in, otherwise
+    // peers that did not click Admit would refuse to connect to the newcomer.
+    await this.publishEnvelope('knock-approved', {
+      approved: true,
+      approvedId: targetId,
+      approver: this.localMeta,
+    });
   }
 
   public async sendKnockRejected(targetId: string): Promise<void> {
@@ -355,7 +361,17 @@ export class AblySignaler extends SignalingClient {
         break;
       }
       case 'knock-approved': {
-        this.events.onKnockApproved?.(envelope.senderId);
+        const payload = envelope.payload as { approvedId?: string } | undefined;
+        // Fall back to targetId for envelopes from an older client, which only
+        // reached the admitted peer in the first place.
+        const admittedId = payload?.approvedId || envelope.targetId;
+
+        if (!admittedId || admittedId === myClientId) {
+          this.events.onKnockApproved?.(envelope.senderId);
+        }
+        if (admittedId) {
+          this.events.onPeerAdmitted?.(admittedId, envelope.senderId);
+        }
         break;
       }
       case 'knock-rejected': {

@@ -128,7 +128,9 @@ export function useDirectCalls(identity: SerializedIdentity | null) {
             RingtoneSynthesizer.stop();
             if (callTimeoutRef.current) clearTimeout(callTimeoutRef.current);
             setOutgoingCall(null);
-            router.push(`/room/${roomCode}`);
+            // The caller owns the room it created, so it enters as host and is
+            // the one who admits the callee.
+            router.push(`/room/${roomCode}?host=1`);
           } else if (type === 'call-reject') {
             RingtoneSynthesizer.stop();
             if (callTimeoutRef.current) clearTimeout(callTimeoutRef.current);

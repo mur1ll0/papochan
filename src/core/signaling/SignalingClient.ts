@@ -67,6 +67,8 @@ export interface SignalingEvents {
   onDeviceStateUpdate: (senderId: string, capabilities: DeviceMetadata['capabilities']) => void;
   onKnock: (request: KnockRequest) => void;
   onKnockApproved: (approverId: string) => void;
+  /** Someone in the room admitted `admittedId`; every member needs to know. */
+  onPeerAdmitted?: (admittedId: string, approverId: string) => void;
   onKnockRejected: (rejectorId: string) => void;
   onKnockCancelled?: (senderId: string) => void;
   onChatMessage?: (msg: any) => void;
@@ -89,5 +91,7 @@ export abstract class SignalingClient {
   abstract sendKnockRejected(targetId: string): Promise<void>;
   abstract sendKnockCancel(): Promise<void>;
   abstract sendChatMessage(msg: any): Promise<void>;
+  /** Peers currently known to be in the room, excluding this client. */
+  abstract getKnownPeersCount(): number;
   abstract setEventListeners(events: Partial<SignalingEvents>): void;
 }

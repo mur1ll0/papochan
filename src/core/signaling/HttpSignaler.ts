@@ -8,6 +8,10 @@ import {
 import { signPayload, verifySignature, canonicalJsonStringify } from '../crypto/keygen';
 import { getApiEndpoint } from '@/lib/api';
 
+function clientIdOf(meta: DeviceMetadata | null): string {
+  return meta ? `${meta.userId}:${meta.deviceId}` : '';
+}
+
 export class HttpSignaler extends SignalingClient {
   private roomCode: string = '';
   private localMeta: DeviceMetadata | null = null;
@@ -62,9 +66,17 @@ export class HttpSignaler extends SignalingClient {
       }
 
       const heartbeatData = await heartbeatRes.json().catch(() => ({}));
-      if (heartbeatData.isHost || (heartbeatData.peersCount !== undefined && heartbeatData.peersCount <= 1)) {
+
+      // Only an explicit grant from the shared store counts. The old
+      // "peersCount <= 1" heuristic promoted any peer that happened to land on a
+      // cold serverless instance, which let guests skip the waiting room.
+      if (heartbeatData.isHost === true) {
         this.isHost = true;
         this.events.onHostAssigned?.(true);
+      } else if (this.isHost && heartbeatData.hostId && heartbeatData.hostId !== clientIdOf(this.localMeta)) {
+        // The room already has a different host; stand down rather than run a
+        // second approval gate in parallel.
+        this.isHost = false;
       }
 
       this.isConnected = true;
@@ -153,7 +165,13 @@ export class HttpSignaler extends SignalingClient {
   }
 
   public async sendKnockApproved(targetId: string): Promise<void> {
-    await this.publishEnvelope('knock-approved', { approved: true, approver: this.localMeta }, targetId);
+    // Broadcast: in a mesh every member has to learn who was let in, otherwise
+    // peers that did not click Admit would refuse to connect to the newcomer.
+    await this.publishEnvelope('knock-approved', {
+      approved: true,
+      approvedId: targetId,
+      approver: this.localMeta,
+    });
   }
 
   public async sendKnockRejected(targetId: string): Promise<void> {
@@ -383,7 +401,17 @@ export class HttpSignaler extends SignalingClient {
         break;
       }
       case 'knock-approved': {
-        this.events.onKnockApproved?.(envelope.senderId);
+        const payload = envelope.payload as { approvedId?: string } | undefined;
+        // Fall back to targetId for envelopes from an older client, which only
+        // reached the admitted peer in the first place.
+        const admittedId = payload?.approvedId || envelope.targetId;
+
+        if (!admittedId || admittedId === myClientId) {
+          this.events.onKnockApproved?.(envelope.senderId);
+        }
+        if (admittedId) {
+          this.events.onPeerAdmitted?.(admittedId, envelope.senderId);
+        }
         break;
       }
       case 'knock-rejected': {

@@ -81,6 +81,11 @@ export class MeshManager {
   private peers = new Map<string, PeerConnection>();
   /** Creations still awaiting WebCrypto key derivation, keyed by node id. */
   private pendingPeers = new Map<string, Promise<PeerConnection>>();
+  /** Peers cleared to connect. Anyone else gets no connection and no media. */
+  private admittedPeers = new Set<string>();
+  /** Peers seen in the room but still waiting to be let in. */
+  private pendingAdmission = new Map<string, DeviceMetadata>();
+  private selfAdmitted = false;
   private peerDataChannels = new Map<string, E2EEDataChannel>();
   private peerNodes = new Map<string, RemotePeerNode>();
   private mediaEngine: MediaEngine | null = null;
@@ -104,6 +109,50 @@ export class MeshManager {
     this.mediaEngine = engine;
   }
 
+  /**
+   * Marks this client as admitted to the room. Everyone already present was
+   * vouched for by whoever admitted us, so they all become reachable.
+   */
+  public setSelfAdmitted(admitted: boolean): void {
+    this.selfAdmitted = admitted;
+    if (!admitted) return;
+
+    for (const nodeId of Array.from(this.pendingAdmission.keys())) {
+      this.admitPeer(nodeId);
+    }
+  }
+
+  /** Lets a specific peer in and connects to it. */
+  public admitPeer(nodeId: string): void {
+    if (this.admittedPeers.has(nodeId)) return;
+    this.admittedPeers.add(nodeId);
+
+    const meta = this.pendingAdmission.get(nodeId);
+    if (!meta || !this.selfAdmitted) return;
+
+    this.pendingAdmission.delete(nodeId);
+    this.getOrCreatePeer(nodeId, meta).catch((err) =>
+      this.reportSignalingFailure('admit-peer', nodeId, err)
+    );
+  }
+
+  /** Withdraws a peer, tearing down any connection it managed to open. */
+  public revokePeer(nodeId: string): void {
+    this.admittedPeers.delete(nodeId);
+    this.pendingAdmission.delete(nodeId);
+    this.removePeer(nodeId);
+  }
+
+  /**
+   * A connection is allowed only once both ends are cleared: this client has
+   * been admitted to the room, and the remote peer has been admitted too. Sister
+   * devices of the local user are implicitly trusted - same identity, same keys.
+   */
+  private canConnectTo(nodeId: string, meta: DeviceMetadata): boolean {
+    if (meta.userId === this.localMeta.userId) return true;
+    return this.selfAdmitted && this.admittedPeers.has(nodeId);
+  }
+
   private setupSignalerEvents(): void {
     this.signaler.setEventListeners({
       onPeerJoined: async (remoteMeta) => {
@@ -113,6 +162,13 @@ export class MeshManager {
         const localNodeId = `${this.localMeta.userId}:${this.localMeta.deviceId}`;
 
         if (remoteNodeId === localNodeId) return;
+
+        if (!this.canConnectTo(remoteNodeId, remoteMeta)) {
+          // Hold them at the door: no RTCPeerConnection means no tracks, so an
+          // unapproved peer cannot see or hear the room while it waits.
+          this.pendingAdmission.set(remoteNodeId, remoteMeta);
+          return;
+        }
 
         try {
           await this.getOrCreatePeer(remoteNodeId, remoteMeta);
@@ -126,6 +182,12 @@ export class MeshManager {
       },
 
       onOffer: async (senderId, sdp, senderMeta) => {
+        if (senderMeta && !this.canConnectTo(senderId, senderMeta)) {
+          this.pendingAdmission.set(senderId, senderMeta);
+          console.warn(`[MeshManager] Ignoring offer from unadmitted peer ${senderId}.`);
+          return;
+        }
+
         try {
           const peer = await this.getOrCreatePeer(senderId, senderMeta);
           const answer = await peer.handleOffer(sdp);
@@ -551,6 +613,7 @@ export class MeshManager {
 
   private removePeer(nodeId: string): void {
     this.pendingPeers.delete(nodeId);
+    this.pendingAdmission.delete(nodeId);
 
     const peer = this.peers.get(nodeId);
     if (peer) {
@@ -685,6 +748,9 @@ export class MeshManager {
     }
     this.peers.clear();
     this.pendingPeers.clear();
+    this.pendingAdmission.clear();
+    this.admittedPeers.clear();
+    this.selfAdmitted = false;
     this.peerDataChannels.clear();
     this.peerNodes.clear();
   }

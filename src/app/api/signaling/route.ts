@@ -31,6 +31,9 @@ interface RoomState {
 // In-memory fallback / L1 cache
 const roomsStore = new Map<string, RoomState>();
 
+/** A peer is considered present while it has heartbeated inside this window. */
+const PEER_ACTIVE_WINDOW_MS = 20000;
+
 function getOrCreateMemoryRoom(roomCode: string): RoomState {
   const code = roomCode.toUpperCase();
   let room = roomsStore.get(code);
@@ -71,19 +74,14 @@ export async function POST(req: NextRequest) {
     if (action === 'heartbeat' && meta) {
       const clientId = `${meta.userId}:${meta.deviceId}`;
       const peerId = `${code}:${clientId}`;
+      const claimsHost = isHost === true;
 
-      // Update in-memory
-      if (!memRoom.hostId || (isHost && !memRoom.peers.has(clientId))) {
-        memRoom.hostId = clientId;
-      }
-      memRoom.peers.set(clientId, {
-        clientId,
-        meta,
-        lastSeen: now,
-        isHost: memRoom.hostId === clientId,
-      });
+      // Keep the in-memory mirror for the DB-unavailable fallback only.
+      memRoom.peers.set(clientId, { clientId, meta, lastSeen: now, isHost: claimsHost });
 
-      // Update PostgreSQL for Vercel multi-instance serverless sync
+      // Host election runs against PostgreSQL, never against `memRoom`. Serverless
+      // instances do not share memory: a peer landing on a cold instance saw an
+      // empty room, crowned itself, and walked straight past the waiting room.
       try {
         await db.signalingPeer.upsert({
           where: { id: peerId },
@@ -92,24 +90,59 @@ export async function POST(req: NextRequest) {
             roomCode: code,
             clientId,
             meta,
-            isHost: isHost || memRoom.hostId === clientId,
+            isHost: claimsHost,
             lastSeen: BigInt(now),
           },
-          update: {
-            meta,
-            isHost: isHost || memRoom.hostId === clientId,
-            lastSeen: BigInt(now),
-          },
+          update: { meta, lastSeen: BigInt(now) },
+        });
+
+        const activeCutoff = BigInt(now - PEER_ACTIVE_WINDOW_MS);
+        const livePeers = await db.signalingPeer.findMany({
+          where: { roomCode: code, lastSeen: { gt: activeCutoff } },
+          orderBy: [{ createdAt: 'asc' }, { clientId: 'asc' }],
+        });
+
+        // 1. A live host keeps the role. 2. Otherwise whoever explicitly claims it
+        //    (the room creator arrives with ?host=1). 3. Otherwise the earliest
+        //    peer, so a direct call with no claimant still gets exactly one host.
+        let host =
+          livePeers.find((p) => p.isHost) ??
+          livePeers.find((p) => p.clientId === clientId && claimsHost) ??
+          livePeers[0];
+
+        if (host && !host.isHost) {
+          await db.signalingPeer.update({
+            where: { id: host.id },
+            data: { isHost: true },
+          });
+        }
+
+        const electedHostId = host?.clientId ?? null;
+        memRoom.hostId = electedHostId;
+
+        return NextResponse.json({
+          success: true,
+          isHost: electedHostId === clientId,
+          hostId: electedHostId,
+          peersCount: livePeers.length,
         });
       } catch (dbErr) {
         console.warn('[Signaling:POST] DB peer upsert fallback to memory:', dbErr);
+      }
+
+      // Memory-only fallback: same rules, single-instance scope.
+      const activeMem = Array.from(memRoom.peers.values()).filter(
+        (p) => now - p.lastSeen < PEER_ACTIVE_WINDOW_MS
+      );
+      if (!memRoom.hostId || !activeMem.some((p) => p.clientId === memRoom.hostId)) {
+        memRoom.hostId = activeMem.find((p) => p.isHost)?.clientId ?? activeMem[0]?.clientId ?? null;
       }
 
       return NextResponse.json({
         success: true,
         isHost: memRoom.hostId === clientId,
         hostId: memRoom.hostId,
-        peersCount: memRoom.peers.size,
+        peersCount: activeMem.length,
       });
     }
 
@@ -226,17 +259,17 @@ export async function GET(req: NextRequest) {
       .filter((m) => !m.targetId || m.targetId === '*' || m.targetId === clientId)
       .map((m) => m.envelope);
 
-    const activePeersCutoff = BigInt(now - 20000);
-    const dbPeers = await db.signalingPeer.findMany({
-      where: {
-        roomCode,
-        clientId: { not: clientId },
-        lastSeen: { gt: activePeersCutoff },
-      },
+    const activePeersCutoff = BigInt(now - PEER_ACTIVE_WINDOW_MS);
+    const allActivePeers = await db.signalingPeer.findMany({
+      where: { roomCode, lastSeen: { gt: activePeersCutoff } },
+      orderBy: [{ createdAt: 'asc' }, { clientId: 'asc' }],
     });
 
+    const dbPeers = allActivePeers.filter((p) => p.clientId !== clientId);
     const activePeers = dbPeers.map((p) => p.meta);
-    const hostPeer = dbPeers.find((p) => p.isHost);
+    // Looked up across every active peer, the caller included, so a host that
+    // reconnects is told it still holds the role instead of starting to knock.
+    const hostPeer = allActivePeers.find((p) => p.isHost);
 
     return NextResponse.json({
       messages: pendingMessages,
@@ -254,7 +287,7 @@ export async function GET(req: NextRequest) {
     });
 
     const activeMemPeers = Array.from(memRoom.peers.values())
-      .filter((p) => p.clientId !== clientId && now - p.lastSeen < 20000)
+      .filter((p) => p.clientId !== clientId && now - p.lastSeen < PEER_ACTIVE_WINDOW_MS)
       .map((p) => p.meta);
 
     return NextResponse.json({

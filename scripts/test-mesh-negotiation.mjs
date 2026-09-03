@@ -260,12 +260,16 @@ function check(name, condition, detail) {
   const remote = makeIdentity('user-remote', 'device-b');
   const signaler = new StubSignaler();
 
-  new MeshManager({
+  const mesh = new MeshManager({
     localMeta: local.meta,
     localSecretKeyDh: local.secretKeyDh,
     localSecretKeyEd: local.secretKeyEd,
     signalingClient: signaler,
   });
+
+  const remoteNodeId = `${remote.meta.userId}:${remote.meta.deviceId}`;
+  mesh.setSelfAdmitted(true);
+  mesh.admitPeer(remoteNodeId);
 
   // One signaling batch: peer list entry + presence-announce + an offer, all
   // dispatched without awaiting - exactly how HttpSignaler.pollMessages and the
@@ -273,11 +277,7 @@ function check(name, condition, detail) {
   const dispatched = [
     signaler.events.onPeerJoined(remote.meta),
     signaler.events.onPeerJoined(remote.meta),
-    signaler.events.onOffer(
-      `${remote.meta.userId}:${remote.meta.deviceId}`,
-      { type: 'offer', sdp: 'remote-offer' },
-      remote.meta
-    ),
+    signaler.events.onOffer(remoteNodeId, { type: 'offer', sdp: 'remote-offer' }, remote.meta),
   ];
   await Promise.all(dispatched);
 
@@ -438,6 +438,101 @@ function check(name, condition, detail) {
     'offer/answer payloads verify after a JSON round trip',
     roundTrip('answer', { sdp: sdpObject }),
     'the messages an MITM would forge'
+  );
+}
+
+// --- Test 5: an unadmitted peer gets no connection and therefore no media ----
+{
+  constructedPeerConnections = 0;
+  createdDataChannels.length = 0;
+
+  const local = makeIdentity('user-host', 'device-host');
+  const intruder = makeIdentity('user-intruder', 'device-intruder');
+  const signaler = new StubSignaler();
+  const intruderId = `${intruder.meta.userId}:${intruder.meta.deviceId}`;
+
+  const mesh = new MeshManager({
+    localMeta: local.meta,
+    localSecretKeyDh: local.secretKeyDh,
+    localSecretKeyEd: local.secretKeyEd,
+    signalingClient: signaler,
+  });
+  mesh.setSelfAdmitted(true); // we are in the room; the intruder is not
+
+  // Someone who guessed the room code shows up and immediately offers.
+  await signaler.events.onPeerJoined(intruder.meta);
+  await signaler.events.onOffer(intruderId, { type: 'offer', sdp: 'intruder-offer' }, intruder.meta);
+
+  check(
+    'an unadmitted peer opens no RTCPeerConnection',
+    constructedPeerConnections === 0,
+    `constructed=${constructedPeerConnections}`
+  );
+  check(
+    'an unadmitted peer gets no answer',
+    signaler.sent.filter((m) => m.type === 'answer').length === 0,
+    'nothing to negotiate against'
+  );
+  check(
+    'an unadmitted peer is not listed as a participant',
+    mesh.getPeers().length === 0,
+    `peers=${mesh.getPeers().length}`
+  );
+
+  // The host clicks Admit.
+  mesh.admitPeer(intruderId);
+  await new Promise((r) => setTimeout(r, 50));
+
+  check(
+    'admitting the peer opens exactly one connection',
+    constructedPeerConnections === 1,
+    `constructed=${constructedPeerConnections}`
+  );
+
+  // ...and clicks Decline on a second one.
+  const rejected = makeIdentity('user-rejected', 'device-rejected');
+  const rejectedId = `${rejected.meta.userId}:${rejected.meta.deviceId}`;
+  const before = constructedPeerConnections;
+  await signaler.events.onPeerJoined(rejected.meta);
+  mesh.revokePeer(rejectedId);
+  await new Promise((r) => setTimeout(r, 50));
+
+  check(
+    'a declined peer never gets a connection',
+    constructedPeerConnections === before,
+    `constructed=${constructedPeerConnections}, before=${before}`
+  );
+}
+
+// --- Test 6: a guest that has not been let in connects to nobody -------------
+{
+  constructedPeerConnections = 0;
+
+  const local = makeIdentity('user-guest', 'device-guest');
+  const host = makeIdentity('user-host', 'device-host');
+  const signaler = new StubSignaler();
+
+  const mesh = new MeshManager({
+    localMeta: local.meta,
+    localSecretKeyDh: local.secretKeyDh,
+    localSecretKeyEd: local.secretKeyEd,
+    signalingClient: signaler,
+  });
+  // setSelfAdmitted is never called: this guest is still in the waiting room.
+
+  await signaler.events.onPeerJoined(host.meta);
+  check(
+    'a guest in the waiting room opens no connection',
+    constructedPeerConnections === 0,
+    `constructed=${constructedPeerConnections}`
+  );
+
+  mesh.setSelfAdmitted(true);
+  await new Promise((r) => setTimeout(r, 50));
+  check(
+    'being approved connects the guest to everyone already present',
+    constructedPeerConnections === 1,
+    `constructed=${constructedPeerConnections}`
   );
 }
 

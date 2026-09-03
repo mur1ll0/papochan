@@ -20,6 +20,13 @@ import { decodeBase64 } from 'tweetnacl-util';
 
 export type AdmissionStatus = 'idle' | 'checking' | 'knocking' | 'approved' | 'rejected';
 
+/**
+ * How long a guest waits for peer discovery before concluding the room really is
+ * empty and letting itself in. Nobody is present to approve an empty room, but
+ * the wait has to outlast discovery so a real occupant is never missed.
+ */
+const EMPTY_ROOM_GRACE_MS = 5000;
+
 export interface UseWebRTCOptions {
   roomCode: string;
   identity: SerializedIdentity | null;
@@ -52,6 +59,18 @@ export function useWebRTC({
   const meshManagerRef = useRef<MeshManager | null>(null);
   const signalerRef = useRef<SignalingClient | null>(null);
   const knockIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const emptyRoomTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  const clearAdmissionTimers = useCallback(() => {
+    if (knockIntervalRef.current) {
+      clearInterval(knockIntervalRef.current);
+      knockIntervalRef.current = null;
+    }
+    if (emptyRoomTimerRef.current) {
+      clearTimeout(emptyRoomTimerRef.current);
+      emptyRoomTimerRef.current = null;
+    }
+  }, []);
 
   // Initialize and Join Room
   const join = useCallback(async () => {
@@ -155,18 +174,12 @@ export function useWebRTC({
 
       // Signaler events for Waiting Room / Knocking
       signaler.setEventListeners({
-        onHostAssigned: async (assignedAsHost) => {
-          console.log('[DEBUG-RTC] onHostAssigned:', assignedAsHost);
-          if (assignedAsHost) {
-            if (knockIntervalRef.current) {
-              clearInterval(knockIntervalRef.current);
-              knockIntervalRef.current = null;
-            }
-            setAdmissionStatus('approved');
-            if (meshManagerRef.current && mediaEngine) {
-              await meshManagerRef.current.syncLocalTracks();
-            }
-          }
+        onHostAssigned: (assignedAsHost) => {
+          // Deliberately does NOT admit. Host election is server-derived state,
+          // and on serverless it can be wrong (a cold instance sees an empty
+          // room). Letting it grant entry is exactly how an uninvited peer used
+          // to walk straight past the waiting room.
+          console.log('[DEBUG-RTC] onHostAssigned (approval rights only):', assignedAsHost);
         },
         onKnock: (request) => {
           console.log('[DEBUG-RTC] onKnock from:', request.senderId);
@@ -180,13 +193,15 @@ export function useWebRTC({
             return [...prev, request];
           });
         },
+        onPeerAdmitted: (admittedId) => {
+          // Someone in the room let this peer in; connect to them too.
+          meshManagerRef.current?.admitPeer(admittedId);
+        },
         onKnockApproved: async () => {
           console.log('[DEBUG-RTC] onKnockApproved');
-          if (knockIntervalRef.current) {
-            clearInterval(knockIntervalRef.current);
-            knockIntervalRef.current = null;
-          }
+          clearAdmissionTimers();
           setAdmissionStatus('approved');
+          meshManagerRef.current?.setSelfAdmitted(true);
           if (signalerRef.current) {
             await signalerRef.current.sendPresenceAnnounce();
           }
@@ -196,10 +211,7 @@ export function useWebRTC({
         },
         onKnockRejected: () => {
           console.log('[DEBUG-RTC] onKnockRejected');
-          if (knockIntervalRef.current) {
-            clearInterval(knockIntervalRef.current);
-            knockIntervalRef.current = null;
-          }
+          clearAdmissionTimers();
           setAdmissionStatus('rejected');
         },
         onKnockCancelled: (senderId) => {
@@ -211,13 +223,13 @@ export function useWebRTC({
       await signaler.connect(roomCode, localMeta, secretKeyEd);
       setSignalingState('connected');
 
-      const isCurrentHost = isHost || (signaler as any).isCurrentHost || (signaler as any).isHost;
-      console.log('[DEBUG-RTC] Connected signaler, isCurrentHost:', isCurrentHost);
+      // Only the room creator (?host=1) enters unannounced. Anything derived from
+      // the signaling server is untrusted for this decision.
+      console.log('[DEBUG-RTC] Connected signaler, room creator:', isHost);
 
-      // Determine Host vs Knocking
-      if (isCurrentHost) {
-        // Explicitly designated as host or automatically assigned by room
+      if (isHost) {
         setAdmissionStatus('approved');
+        mesh.setSelfAdmitted(true);
         if (mediaEngine) {
           await mesh.syncLocalTracks();
         }
@@ -231,6 +243,23 @@ export function useWebRTC({
         knockIntervalRef.current = setInterval(() => {
           signaler.sendKnock().catch(() => {});
         }, 3000);
+
+        // A room with nobody in it has nobody to approve you. Wait for peer
+        // discovery to settle first: presence and the peer list converge in well
+        // under a second, so anyone actually present will have been seen by now.
+        emptyRoomTimerRef.current = setTimeout(async () => {
+          emptyRoomTimerRef.current = null;
+          const knownPeers = signalerRef.current?.getKnownPeersCount?.() ?? 0;
+          if (knownPeers > 0) return;
+
+          console.log('[DEBUG-RTC] Room is empty, self-admitting as first participant.');
+          clearAdmissionTimers();
+          setAdmissionStatus('approved');
+          meshManagerRef.current?.setSelfAdmitted(true);
+          if (mediaEngine && meshManagerRef.current) {
+            await meshManagerRef.current.syncLocalTracks();
+          }
+        }, EMPTY_ROOM_GRACE_MS);
       }
     } catch (err: any) {
       console.error('[useWebRTC] Failed to join room:', err);
@@ -246,10 +275,7 @@ export function useWebRTC({
 
   const leave = useCallback(async () => {
     try {
-      if (knockIntervalRef.current) {
-        clearInterval(knockIntervalRef.current);
-        knockIntervalRef.current = null;
-      }
+      clearAdmissionTimers();
       if (signalerRef.current) {
         await signalerRef.current.disconnect();
         signalerRef.current = null;
@@ -266,7 +292,7 @@ export function useWebRTC({
       setCoPresenceGroups([]);
       setSignalingState('disconnected');
     }
-  }, []);
+  }, [clearAdmissionTimers]);
 
   // Sync tracks whenever mediaEngine state alters
   const syncTracks = useCallback(async () => {
@@ -326,6 +352,9 @@ export function useWebRTC({
 
   const approveKnock = useCallback(async (senderId: string) => {
     if (signalerRef.current) {
+      // Open the gate first, so the connection is already permitted by the time
+      // the approved peer starts negotiating.
+      meshManagerRef.current?.admitPeer(senderId);
       await signalerRef.current.sendKnockApproved(senderId);
       setPendingKnocks((prev) => prev.filter((k) => k.senderId !== senderId));
       if (meshManagerRef.current && mediaEngine) {
@@ -336,12 +365,15 @@ export function useWebRTC({
 
   const rejectKnock = useCallback(async (senderId: string) => {
     if (signalerRef.current) {
+      // Tear down anything they managed to open, then tell them no.
+      meshManagerRef.current?.revokePeer(senderId);
       await signalerRef.current.sendKnockRejected(senderId);
       setPendingKnocks((prev) => prev.filter((k) => k.senderId !== senderId));
     }
   }, []);
 
   const cancelKnock = useCallback(async () => {
+    clearAdmissionTimers();
     try {
       if (signalerRef.current) {
         await signalerRef.current.sendKnockCancel();
@@ -350,7 +382,7 @@ export function useWebRTC({
       // ignore
     }
     await leave();
-  }, [leave]);
+  }, [leave, clearAdmissionTimers]);
 
   const clearChatMemory = useCallback(() => {
     setMessages([]);
