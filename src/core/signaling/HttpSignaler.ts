@@ -255,7 +255,13 @@ export class HttpSignaler extends SignalingClient {
     payload: T,
     targetId?: string
   ): Promise<void> {
-    if (!this.localMeta || !this.secretKeyEd) return;
+    if (!this.localMeta || !this.secretKeyEd) {
+      console.error(
+        `[HttpSignaler] Dropped "${type}": signaler is not connected. ` +
+          'The peer waiting on this signal will stall.'
+      );
+      return;
+    }
 
     const senderId = `${this.localMeta.userId}:${this.localMeta.deviceId}`;
     const timestamp = Date.now();

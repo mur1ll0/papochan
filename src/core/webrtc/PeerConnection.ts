@@ -36,6 +36,12 @@ export class PeerConnection {
   private remoteStream = new MediaStream();
   private dataChannel: RTCDataChannel | null = null;
   private isClosed = false;
+  private offerRetryTimer: ReturnType<typeof setTimeout> | null = null;
+  private offerRetries = 0;
+
+  /** How long to wait for an answer before assuming the offer was lost. */
+  private static readonly OFFER_ANSWER_TIMEOUT_MS = 4000;
+  private static readonly MAX_OFFER_RETRIES = 3;
 
   constructor(private options: PeerConnectionOptions) {
     this.localId = options.localId;
@@ -125,7 +131,15 @@ export class PeerConnection {
       }
     };
 
-    // 6. ICE Connection State
+    // 6. Signaling State - a completed negotiation disarms the offer watchdog.
+    this.pc.onsignalingstatechange = () => {
+      if (this.pc.signalingState === 'stable') {
+        this.clearOfferRetry();
+        this.offerRetries = 0;
+      }
+    };
+
+    // 7. ICE Connection State
     this.pc.oniceconnectionstatechange = () => {
       if (this.isClosed) return;
       if (this.pc.iceConnectionState === 'failed') {
@@ -275,9 +289,50 @@ export class PeerConnection {
     if (ownsFlag) this.makingOffer = true;
     try {
       await this.pc.setLocalDescription();
+      if (this.pc.localDescription?.type === 'offer') {
+        this.armOfferRetry();
+      }
       return this.pc.localDescription!;
     } finally {
       if (ownsFlag) this.makingOffer = false;
+    }
+  }
+
+  /**
+   * Re-sends the offer if no answer arrives.
+   *
+   * Signaling is best-effort: a message can be dropped by a transport hiccup, a
+   * reconnect, or a peer that was still starting up. Without this the connection
+   * sits in `have-local-offer` forever and no media ever flows, with nothing in
+   * the UI to say why.
+   */
+  private armOfferRetry(): void {
+    this.clearOfferRetry();
+    if (this.offerRetries >= PeerConnection.MAX_OFFER_RETRIES) return;
+
+    this.offerRetryTimer = setTimeout(async () => {
+      this.offerRetryTimer = null;
+      if (this.isClosed || this.pc.signalingState !== 'have-local-offer') return;
+
+      this.offerRetries += 1;
+      console.warn(
+        `[PeerConnection:${this.remoteId}] No answer after ` +
+          `${PeerConnection.OFFER_ANSWER_TIMEOUT_MS}ms, re-sending offer ` +
+          `(attempt ${this.offerRetries}/${PeerConnection.MAX_OFFER_RETRIES}).`
+      );
+
+      try {
+        await this.options.onNegotiationNeeded(this.remoteId);
+      } catch (err) {
+        console.error(`[PeerConnection:${this.remoteId}] Offer retry failed:`, err);
+      }
+    }, PeerConnection.OFFER_ANSWER_TIMEOUT_MS);
+  }
+
+  private clearOfferRetry(): void {
+    if (this.offerRetryTimer) {
+      clearTimeout(this.offerRetryTimer);
+      this.offerRetryTimer = null;
     }
   }
 
@@ -404,6 +459,7 @@ export class PeerConnection {
 
   public close(): void {
     this.isClosed = true;
+    this.clearOfferRetry();
     try {
       if (this.dataChannel) {
         this.dataChannel.close();

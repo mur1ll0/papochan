@@ -56,6 +56,13 @@ export class UniversalSignaler extends SignalingClient {
         const ably = new AblySignaler(getApiEndpoint('/api/signaling-token'));
         ably.setEventListeners(this.events);
 
+        // Route outgoing signals through the new transport BEFORE connecting.
+        // connect() subscribes and starts delivering immediately - a peer already
+        // in the room offers while we are still inside it - and anything we sent
+        // in reply while this still pointed at the unconnected placeholder was
+        // silently discarded, leaving the offerer stuck in have-local-offer.
+        this.activeSignaler = ably;
+
         // Connect to Ably with 12-second timeout guard for mobile connections
         await Promise.race([
           ably.connect(roomCode, localMeta, secretKeyEd),
@@ -64,7 +71,6 @@ export class UniversalSignaler extends SignalingClient {
           ),
         ]);
 
-        this.activeSignaler = ably;
         console.log('✔ [UniversalSignaler] Connected via Ably Realtime WebSocket!');
         return;
       } catch (ablyErr) {
@@ -76,8 +82,8 @@ export class UniversalSignaler extends SignalingClient {
     console.log('[UniversalSignaler] Using Resilient Server HTTP Signaling Bus');
     const http = new HttpSignaler(this.isHost);
     http.setEventListeners(this.events);
-    await http.connect(roomCode, localMeta, secretKeyEd);
     this.activeSignaler = http;
+    await http.connect(roomCode, localMeta, secretKeyEd);
   }
 
   public async disconnect(): Promise<void> {

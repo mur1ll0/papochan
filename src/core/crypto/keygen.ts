@@ -64,13 +64,31 @@ export function importPublicKey(base64Key: string): Uint8Array {
  * due to JSON object key reordering during network transit or database JSONB storage.
  */
 export function canonicalJsonStringify(obj: any): string {
+  // Match JSON.stringify's treatment of undefined, because the verifier only
+  // ever sees the payload after a JSON round trip: undefined array entries
+  // become null, and undefined object properties disappear entirely. Keeping
+  // them here made the signer and the verifier hash different strings, so every
+  // signature check failed.
+  if (obj === undefined) {
+    return 'null';
+  }
   if (obj === null || typeof obj !== 'object') {
     return JSON.stringify(obj);
+  }
+  // Honour toJSON() the way JSON.stringify does. Native WebRTC objects such as
+  // RTCSessionDescription expose type/sdp as prototype getters, so Object.keys()
+  // sees nothing: without this, every offer and answer was signed over an empty
+  // {} while the receiver verified the real serialized payload, and the Ed25519
+  // check could never pass on the messages that matter most.
+  if (typeof obj.toJSON === 'function') {
+    return canonicalJsonStringify(obj.toJSON());
   }
   if (Array.isArray(obj)) {
     return '[' + obj.map(canonicalJsonStringify).join(',') + ']';
   }
-  const sortedKeys = Object.keys(obj).sort();
+  const sortedKeys = Object.keys(obj)
+    .filter((key) => obj[key] !== undefined && typeof obj[key] !== 'function')
+    .sort();
   const pairs = sortedKeys.map(
     (key) => `${JSON.stringify(key)}:${canonicalJsonStringify(obj[key])}`
   );

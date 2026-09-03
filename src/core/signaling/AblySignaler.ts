@@ -225,6 +225,10 @@ export class AblySignaler extends SignalingClient {
     targetId?: string
   ): Promise<void> {
     if (!this.channel || !this.localMeta || !this.secretKeyEd) {
+      console.error(
+        `[AblySignaler] Dropped "${type}": channel is not ready. ` +
+          'The peer waiting on this signal will stall.'
+      );
       return;
     }
 

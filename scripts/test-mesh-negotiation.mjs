@@ -141,7 +141,7 @@ writeFileSync(
       baseUrl: '.',
       paths: { '@/*': ['./src/*'] },
     },
-    files: ['src/core/webrtc/MeshManager.ts', 'src/lib/turn.ts'],
+    files: ['src/core/webrtc/MeshManager.ts', 'src/lib/turn.ts', 'src/core/crypto/keygen.ts'],
   })
 );
 
@@ -382,6 +382,62 @@ function check(name, condition, detail) {
     JSON.stringify(parseTurnUrls('turn:a:3478, https://nope, turns:b:5349')) ===
       JSON.stringify(['turn:a:3478', 'turns:b:5349']),
     JSON.stringify(parseTurnUrls('turn:a:3478, https://nope, turns:b:5349'))
+  );
+}
+
+// --- Test 4: signaling signatures survive the wire ---------------------------
+{
+  const { canonicalJsonStringify, signPayload, verifySignature } =
+    requireCompiled(locate(outDir, 'keygen.js'));
+
+  const kp = requireRoot('tweetnacl').sign.keyPair();
+  const publicKeyEd = encodeBase64(kp.publicKey);
+
+  // Signs a payload, pushes it through a JSON round trip the way a signaling
+  // transport does, and verifies it on the other side.
+  const roundTrip = (type, payload) => {
+    const timestamp = Date.now();
+    const head = `${type}|sender|*|ROOM|${timestamp}|`;
+    const signature = signPayload(head + canonicalJsonStringify(payload), kp.secretKey);
+    const received = JSON.parse(JSON.stringify({ payload })).payload;
+    return verifySignature(head + canonicalJsonStringify(received), signature, publicKeyEd);
+  };
+
+  check(
+    'plain object payloads verify after a JSON round trip',
+    roundTrip('knock', { userId: 'u', capabilities: { hasAudio: true } }),
+    'presence, knock, chat'
+  );
+
+  check(
+    'undefined properties do not break verification',
+    roundTrip('device-state-update', { hasAudio: true, trackMap: { userVideoTrackId: undefined } }),
+    'JSON.stringify drops them in transit'
+  );
+
+  // RTCSessionDescription exposes type/sdp as prototype getters and serializes
+  // through toJSON(). Object.keys() sees nothing, so a canonicaliser that
+  // ignores toJSON signs {} and can never match the verifier.
+  class FakeSessionDescription {
+    constructor(type, sdp) {
+      Object.defineProperty(this, '_t', { value: type, enumerable: false });
+      Object.defineProperty(this, '_s', { value: sdp, enumerable: false });
+    }
+    get type() { return this._t; }
+    get sdp() { return this._s; }
+    toJSON() { return { type: this._t, sdp: this._s }; }
+  }
+
+  const sdpObject = new FakeSessionDescription('answer', 'v=0\r\na=mid:0\r\n');
+  check(
+    'canonical form of an SDP object is not empty',
+    canonicalJsonStringify(sdpObject) !== '{}',
+    canonicalJsonStringify(sdpObject).slice(0, 48)
+  );
+  check(
+    'offer/answer payloads verify after a JSON round trip',
+    roundTrip('answer', { sdp: sdpObject }),
+    'the messages an MITM would forge'
   );
 }
 
