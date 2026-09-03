@@ -223,7 +223,10 @@ export default function RoomPage() {
           <div className="flex items-center gap-2.5">
             <ChameleonLogo size={28} variant="dark" />
             <span className="text-sm text-slate-300 font-semibold hidden sm:inline">{t('room.header.roomCode')}</span>
-            <span className="text-sm font-mono font-bold text-chan-turquoise px-3 py-1 rounded-xl bg-slate-900 border border-slate-800 shadow-sm">
+            {/* Read out loud or copied by hand more often than it is clicked, so it
+                is sized to be legible across the room. select-all overrides the
+                page-wide select-none, letting one click grab the whole code. */}
+            <span className="select-all text-lg sm:text-2xl font-mono font-bold tracking-wider text-chan-turquoise px-3 sm:px-4 py-1 sm:py-1.5 rounded-xl bg-slate-900 border border-slate-800 shadow-sm">
               {roomCode}
             </span>
             <button
