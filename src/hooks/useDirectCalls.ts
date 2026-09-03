@@ -127,10 +127,14 @@ export function useDirectCalls(identity: SerializedIdentity | null) {
             // Callee accepted our outgoing call!
             RingtoneSynthesizer.stop();
             if (callTimeoutRef.current) clearTimeout(callTimeoutRef.current);
+            const calleeDeviceId = message.data?.calleeDeviceId;
             setOutgoingCall(null);
-            // The caller owns the room it created, so it enters as host and is
-            // the one who admits the callee.
-            router.push(`/room/${roomCode}?host=1`);
+            // The caller owns the room it created, so it enters as host. It also
+            // carries the id of the device it dialed: that peer already consented
+            // by answering, so asking the caller to approve it again is a second
+            // prompt for one decision. Anyone else still has to knock.
+            const invited = calleeDeviceId ? `&invited=${encodeURIComponent(calleeDeviceId)}` : '';
+            router.push(`/room/${roomCode}?host=1${invited}`);
           } else if (type === 'call-reject') {
             RingtoneSynthesizer.stop();
             if (callTimeoutRef.current) clearTimeout(callTimeoutRef.current);
@@ -233,6 +237,7 @@ export function useDirectCalls(identity: SerializedIdentity | null) {
       type: 'call-accept',
       callId: incomingCall.callId,
       roomCode: incomingCall.roomCode,
+      calleeDeviceId: identity?.deviceId,
     });
 
     const destinationRoom = incomingCall.roomCode;

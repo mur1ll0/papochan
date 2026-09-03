@@ -32,6 +32,7 @@ export default function RoomPage() {
   const { t } = useI18n();
   const roomCode = ((params?.code as string) || '').toUpperCase();
   const isHost = searchParams.get('host') === '1' || searchParams.get('isHost') === 'true';
+  const invitedDeviceId = searchParams.get('invited');
 
   const { identity, isLoading: isCryptoLoading, updateProfile } = useCrypto();
 
@@ -54,6 +55,7 @@ export default function RoomPage() {
     mediaEngine: media.engine,
     autoJoin: hasJoined,
     isHost,
+    autoAdmitDeviceId: invitedDeviceId,
   });
 
   useEffect(() => {
@@ -89,7 +91,11 @@ export default function RoomPage() {
 
   const handleCopyLink = () => {
     if (typeof window !== 'undefined') {
-      navigator.clipboard.writeText(window.location.href);
+      // Share the bare room URL. window.location.href still carries ?host=1 and
+      // ?invited=..., so copying it verbatim would hand whoever receives the
+      // link host rights and let them walk straight past the waiting room.
+      const inviteUrl = `${window.location.origin}/room/${roomCode}`;
+      navigator.clipboard.writeText(inviteUrl);
       setCopiedLink(true);
       setTimeout(() => setCopiedLink(false), 2000);
     }

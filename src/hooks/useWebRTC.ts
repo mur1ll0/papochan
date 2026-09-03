@@ -33,6 +33,13 @@ export interface UseWebRTCOptions {
   mediaEngine: MediaEngine | null;
   autoJoin?: boolean;
   isHost?: boolean;
+  /**
+   * Device id this client dialed in a direct call. That peer already consented
+   * by answering the ringing screen, so prompting the caller to approve it
+   * again is a second confirmation for one decision. Every other device still
+   * has to knock.
+   */
+  autoAdmitDeviceId?: string | null;
 }
 
 export function useWebRTC({
@@ -41,6 +48,7 @@ export function useWebRTC({
   mediaEngine,
   autoJoin = true,
   isHost = false,
+  autoAdmitDeviceId = null,
 }: UseWebRTCOptions) {
   const [signalingState, setSignalingState] = useState<
     'idle' | 'connecting' | 'connected' | 'disconnected' | 'failed'
@@ -185,6 +193,14 @@ export function useWebRTC({
           console.log('[DEBUG-RTC] onKnock from:', request.senderId);
           // Auto-approve if it's a sister device belonging to the exact same user
           if (request.meta.userId === localMeta.userId) {
+            meshManagerRef.current?.admitPeer(request.senderId);
+            signaler.sendKnockApproved(request.senderId);
+            return;
+          }
+          // Auto-approve the exact device we dialed in a direct call.
+          if (autoAdmitDeviceId && request.meta.deviceId === autoAdmitDeviceId) {
+            console.log('[DEBUG-RTC] Auto-admitting dialed device:', request.senderId);
+            meshManagerRef.current?.admitPeer(request.senderId);
             signaler.sendKnockApproved(request.senderId);
             return;
           }
@@ -270,7 +286,7 @@ export function useWebRTC({
       setAdmissionStatus('rejected');
       setError(err.message || 'Failed to connect to signaling');
     }
-  }, [roomCode, identity, mediaEngine, isHost]);
+  }, [roomCode, identity, mediaEngine, isHost, autoAdmitDeviceId, clearAdmissionTimers]);
 
 
   const leave = useCallback(async () => {

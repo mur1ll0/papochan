@@ -34,19 +34,24 @@ async function handleAuth(req: NextRequest) {
     const { searchParams } = new URL(req.url);
     let clientId = searchParams.get('clientId');
     let roomCode = searchParams.get('roomCode');
+    let deviceId = searchParams.get('deviceId');
 
     if (req.method === 'POST') {
       try {
         const body = await req.json();
         clientId = body.clientId || clientId;
         roomCode = body.roomCode || roomCode;
+        deviceId = body.deviceId || deviceId;
       } catch {
         // body might be empty in some GET/POST proxies
       }
     }
 
     if (!clientId) {
-      clientId = `anon:${crypto.randomUUID()}`;
+      // Derive it from the device rather than minting a fresh random id: Ably
+      // rejects a renewed token whose clientId differs from the connected one,
+      // which would drop the inbox subscription mid-call.
+      clientId = deviceId ? `device:${deviceId}` : `anon:${crypto.randomUUID()}`;
     }
 
     if (!roomCode) {
@@ -65,7 +70,7 @@ async function handleAuth(req: NextRequest) {
       });
     }
 
-    const tokenRequest = await createAblyTokenRequest(clientId, roomCode);
+    const tokenRequest = await createAblyTokenRequest(clientId, roomCode, deviceId ?? undefined);
     return NextResponse.json({ ...tokenRequest, hasAbly: true });
 
   } catch (error: any) {
