@@ -17,6 +17,7 @@ export class AblySignaler extends SignalingClient {
   private secretKeyEd: Uint8Array | null = null;
   private events: Partial<SignalingEvents> = {};
   private knownPeers = new Map<string, DeviceMetadata>();
+  private processedSignatures = new Set<string>();
 
   constructor(private apiKeyOrTokenUrl?: string) {
     super();
@@ -34,6 +35,7 @@ export class AblySignaler extends SignalingClient {
     this.roomCode = roomCode;
     this.localMeta = localMeta;
     this.secretKeyEd = secretKeyEd;
+    this.processedSignatures.clear();
 
     const clientId = `${localMeta.userId}:${localMeta.deviceId}`;
 
@@ -82,10 +84,11 @@ export class AblySignaler extends SignalingClient {
       });
 
       // Join room signaling channel
+      // No `rewind`: replaying signaling history re-delivers stale SDP and ICE
+      // for connections that already moved on. Presence plus the explicit
+      // presence-announce below is enough for mesh convergence.
       const channelName = `ghost:room:${roomCode}`;
-      this.channel = this.client.channels.get(channelName, {
-        params: { rewind: '10s' },
-      });
+      this.channel = this.client.channels.get(channelName);
 
       // Subscribe to signal messages
       await this.channel.subscribe('signal', (message: Ably.Message) => {
@@ -154,6 +157,7 @@ export class AblySignaler extends SignalingClient {
       this.channel = null;
       this.client = null;
       this.knownPeers.clear();
+      this.processedSignatures.clear();
       this.events.onConnectionStateChange?.('disconnected');
     }
   }
@@ -253,6 +257,17 @@ export class AblySignaler extends SignalingClient {
 
     // Discard signals emitted by self
     if (envelope.senderId === myClientId) return;
+
+    // Discard replays: Ably can redeliver on reconnect, and applying the same
+    // offer or answer twice throws InvalidStateError and kills the negotiation.
+    const sigKey =
+      envelope.signature || `${envelope.senderId}-${envelope.timestamp}-${envelope.type}`;
+    if (this.processedSignatures.has(sigKey)) return;
+    this.processedSignatures.add(sigKey);
+    if (this.processedSignatures.size > 2000) {
+      const oldest = this.processedSignatures.values().next().value;
+      if (oldest) this.processedSignatures.delete(oldest);
+    }
 
     // Discard targeted signals not intended for this device
     if (envelope.targetId && envelope.targetId !== myClientId) return;

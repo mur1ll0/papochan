@@ -91,6 +91,11 @@ export class E2EEDataChannel {
     return this.channel.readyState === 'open';
   }
 
+  /** Underlying RTCDataChannel, so callers can tell two wrappers apart. */
+  public get rawChannel(): RTCDataChannel {
+    return this.channel;
+  }
+
   private setupChannelListeners(): void {
     this.channel.binaryType = 'arraybuffer';
 

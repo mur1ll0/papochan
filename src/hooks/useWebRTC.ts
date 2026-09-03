@@ -9,6 +9,7 @@ import {
 import { UniversalSignaler } from '@/core/signaling/UniversalSignaler';
 import { SignalingClient, DeviceMetadata, KnockRequest } from '@/core/signaling/SignalingClient';
 import { MediaEngine } from '@/core/webrtc/MediaEngine';
+import { resolveIceServers } from '@/core/webrtc/iceServers';
 import {
   ChatTextMessage,
   TypingIndicator,
@@ -84,13 +85,13 @@ export function useWebRTC({
       const signaler = new UniversalSignaler(isHost);
       signalerRef.current = signaler;
 
-      // Custom ICE servers if configured in env
-      const stunServersStr =
-        process.env.NEXT_PUBLIC_STUN_SERVERS ||
-        'stun:stun.l.google.com:19302,stun:stun1.l.google.com:19302,stun:stun2.l.google.com:19302,stun:stun.cloudflare.com:3478,stun:stun.services.mozilla.com';
-      const iceServers: RTCIceServer[] = stunServersStr
-        .split(',')
-        .map((url) => ({ urls: url.trim() }));
+      // STUN for host/srflx discovery plus a TURN relay: peers behind symmetric
+      // NAT or CGNAT never form a direct path, and without a relay media and the
+      // DataChannel fail silently while server-relayed signaling keeps working.
+      // The relay credential is minted per session by /api/turn-credentials.
+      const iceServers: RTCIceServer[] = await resolveIceServers(
+        `${localMeta.userId}:${localMeta.deviceId}`
+      );
 
       // Initialize Mesh Manager
       const mesh = new MeshManager({

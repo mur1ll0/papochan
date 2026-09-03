@@ -1,0 +1,28 @@
+services:
+  coturn:
+    image: coturn/coturn:4.6
+    container_name: papochan-coturn
+    restart: unless-stopped
+
+    # Host networking on purpose. coturn hands out relay addresses and needs to
+    # see real source addresses; behind Docker's NAT it would advertise the
+    # container IP, and publishing the whole relay port range through userland
+    # proxies is slow and memory hungry.
+    #
+    # On Docker Desktop for Windows/macOS host networking is limited - run this
+    # on the Linux VM that will actually serve traffic.
+    network_mode: host
+
+    volumes:
+      - ./turnserver.conf:/etc/coturn/turnserver.conf:ro
+      # Let's Encrypt output, read-only. Drop this line (and the cert/pkey lines
+      # in turnserver.conf) if you are testing without TLS.
+      - ./certs:/etc/coturn/certs:ro
+
+    command: ["-c", "/etc/coturn/turnserver.conf"]
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

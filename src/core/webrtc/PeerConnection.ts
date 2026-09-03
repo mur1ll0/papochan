@@ -1,4 +1,5 @@
 import { DeviceMetadata } from '../signaling/SignalingClient';
+import { buildIceServers, sanitizeIceServers } from './iceServers';
 
 export interface PeerConnectionOptions {
   localId: string;
@@ -13,17 +14,8 @@ export interface PeerConnectionOptions {
   onConnectionStateChange: (state: RTCPeerConnectionState, peerId: string) => void;
 }
 
-export const DEFAULT_ICE_SERVERS: RTCIceServer[] = [
-  { urls: 'stun:stun.l.google.com:19302' },
-  { urls: 'stun:stun1.l.google.com:19302' },
-  { urls: 'stun:stun2.l.google.com:19302' },
-  { urls: 'stun:stun3.l.google.com:19302' },
-  { urls: 'stun:stun4.l.google.com:19302' },
-  { urls: 'stun:stun.cloudflare.com:3478' },
-  { urls: 'stun:stun.services.mozilla.com' },
-  { urls: 'stun:stun.nextcloud.com:443' },
-  { urls: 'stun:stun.relay.metered.ca:80' },
-];
+/** @deprecated Use `buildIceServers()` from ./iceServers instead. */
+export const DEFAULT_ICE_SERVERS: RTCIceServer[] = buildIceServers();
 
 /**
  * PeerConnection encapsulates RTCPeerConnection implementing the standard
@@ -53,7 +45,7 @@ export class PeerConnection {
     // Determine polite vs impolite peer deterministically by comparing IDs
     this.isPolite = this.localId.localeCompare(this.remoteId) > 0;
 
-    const iceServers = options.iceServers?.length ? options.iceServers : DEFAULT_ICE_SERVERS;
+    const iceServers = sanitizeIceServers(options.iceServers);
 
     this.pc = new RTCPeerConnection({
       iceServers,
@@ -70,6 +62,8 @@ export class PeerConnection {
     this.pc.onnegotiationneeded = async () => {
       if (this.isClosed) return;
       try {
+        // Owns the flag for the whole create-offer + publish round trip, so a
+        // remote offer arriving mid-flight is correctly seen as a collision.
         this.makingOffer = true;
         await this.options.onNegotiationNeeded(this.remoteId);
       } catch (err) {
@@ -114,7 +108,12 @@ export class PeerConnection {
     this.pc.onconnectionstatechange = () => {
       if (this.isClosed) return;
       const state = this.pc.connectionState;
+      console.log(`[PeerConnection:${this.remoteId}] connectionState -> ${state}`);
       this.options.onConnectionStateChange(state, this.remoteId);
+
+      if (state === 'connected') {
+        this.logSelectedCandidatePair();
+      }
 
       if (state === 'failed') {
         console.warn(`[PeerConnection:${this.remoteId}] ICE/DTLS failed. Initiating ICE restart.`);
@@ -182,7 +181,10 @@ export class PeerConnection {
   /**
    * Synchronizes active local media streams (user media + screen share) with RTCRtpSenders.
    */
-  public syncLocalTracks(userStream: MediaStream | null, screenStream: MediaStream | null): void {
+  public async syncLocalTracks(
+    userStream: MediaStream | null,
+    screenStream: MediaStream | null
+  ): Promise<void> {
     if (this.isClosed) return;
 
     const activeUserTracks: MediaStreamTrack[] = userStream
@@ -192,41 +194,47 @@ export class PeerConnection {
       ? screenStream.getTracks().filter((t) => t.readyState === 'live')
       : [];
 
-    const currentSenders = this.pc.getSenders();
+    const isScreenTrack = (track: MediaStreamTrack | null): boolean =>
+      !!track && activeScreenTracks.some((t) => t === track || t.id === track.id);
 
     // 1. User Stream Audio / Video Tracks
-    activeUserTracks.forEach((track) => {
-      const exactSender = currentSenders.find((s) => s.track === track || s.track?.id === track.id);
-      if (exactSender) {
-        return;
+    for (const track of activeUserTracks) {
+      const senders = this.pc.getSenders();
+      if (senders.some((s) => s.track === track || s.track?.id === track.id)) {
+        continue;
       }
 
-      // Check if there is an existing sender of the same kind that was sending a previous user track
-      const existingKindSender = currentSenders.find(
-        (s) => s.track && s.track.kind === track.kind && !activeScreenTracks.includes(s.track)
+      // Reuse the sender already carrying a user track of the same kind (device
+      // switch) rather than opening a second transceiver for it.
+      const reusableSender = senders.find(
+        (s) => s.track && s.track.kind === track.kind && !isScreenTrack(s.track)
       );
 
-      if (existingKindSender && typeof existingKindSender.replaceTrack === 'function') {
-        existingKindSender.replaceTrack(track).catch((err) => {
-          console.warn('[PeerConnection] replaceTrack failed, adding track:', err);
-          try {
-            if (userStream) this.pc.addTrack(track, userStream);
-          } catch {}
-        });
-      } else {
+      if (reusableSender && typeof reusableSender.replaceTrack === 'function') {
         try {
-          if (userStream) {
-            this.pc.addTrack(track, userStream);
-          }
+          // Awaited on purpose: the removal pass below reads sender.track, and
+          // would tear down the very sender we just handed a new track to.
+          await reusableSender.replaceTrack(track);
+          continue;
         } catch (err) {
-          console.warn('[PeerConnection] Failed to add user track:', err);
+          console.warn('[PeerConnection] replaceTrack failed, adding track:', err);
         }
       }
-    });
+
+      try {
+        if (userStream) {
+          this.pc.addTrack(track, userStream);
+        }
+      } catch (err) {
+        console.warn('[PeerConnection] Failed to add user track:', err);
+      }
+    }
 
     // 2. Screen Stream Tracks (Screen Video + Screen Audio)
-    activeScreenTracks.forEach((track) => {
-      const alreadySending = currentSenders.some((s) => s.track === track || s.track?.id === track.id);
+    for (const track of activeScreenTracks) {
+      const alreadySending = this.pc
+        .getSenders()
+        .some((s) => s.track === track || s.track?.id === track.id);
       if (!alreadySending && screenStream) {
         try {
           this.pc.addTrack(track, screenStream);
@@ -234,22 +242,25 @@ export class PeerConnection {
           console.warn('[PeerConnection] Failed to add screen track:', err);
         }
       }
-    });
+    }
 
-    // 3. Remove stopped senders or screen senders when screen sharing ended
-    currentSenders.forEach((sender) => {
-      if (!sender.track || sender.track.readyState === 'ended') {
+    // 3. Remove stopped senders, or senders whose track left every local stream.
+    //    Read fresh: the passes above mutated the sender list.
+    this.pc.getSenders().forEach((sender) => {
+      const track = sender.track;
+
+      if (!track || track.readyState === 'ended') {
         try {
           this.pc.removeTrack(sender);
         } catch {}
-      } else {
-        const isUserTrack = activeUserTracks.some((t) => t === sender.track || t.id === sender.track?.id);
-        const isScreenTrack = activeScreenTracks.some((t) => t === sender.track || t.id === sender.track?.id);
-        if (!isUserTrack && !isScreenTrack) {
-          try {
-            this.pc.removeTrack(sender);
-          } catch {}
-        }
+        return;
+      }
+
+      const isUserTrack = activeUserTracks.some((t) => t === track || t.id === track.id);
+      if (!isUserTrack && !isScreenTrack(track)) {
+        try {
+          this.pc.removeTrack(sender);
+        } catch {}
       }
     });
   }
@@ -258,12 +269,15 @@ export class PeerConnection {
    * Creates an SDP Offer (handling perfect negotiation collision rules).
    */
   public async createOffer(): Promise<RTCSessionDescriptionInit> {
-    this.makingOffer = true;
+    // When called from onnegotiationneeded the flag is already owned upstream and
+    // must survive until the offer is published; only a direct call clears it.
+    const ownsFlag = !this.makingOffer;
+    if (ownsFlag) this.makingOffer = true;
     try {
       await this.pc.setLocalDescription();
       return this.pc.localDescription!;
     } finally {
-      this.makingOffer = false;
+      if (ownsFlag) this.makingOffer = false;
     }
   }
 
@@ -308,6 +322,16 @@ export class PeerConnection {
    */
   public async handleAnswer(answer: RTCSessionDescriptionInit): Promise<void> {
     if (this.isClosed) return;
+
+    // A stale or duplicated answer applied outside `have-local-offer` throws
+    // InvalidStateError and aborts the negotiation for good.
+    if (this.pc.signalingState !== 'have-local-offer') {
+      console.warn(
+        `[PeerConnection:${this.remoteId}] Ignoring answer in signalingState "${this.pc.signalingState}".`
+      );
+      return;
+    }
+
     this.isSettingRemoteAnswerPending = true;
     try {
       await this.pc.setRemoteDescription(answer);
@@ -349,6 +373,28 @@ export class PeerConnection {
           }
         }
       }
+    }
+  }
+
+  /**
+   * Reports which candidate pair won, so a call relayed through TURN (or one
+   * that only ever succeeds on the same LAN) is visible in the console.
+   */
+  private async logSelectedCandidatePair(): Promise<void> {
+    try {
+      const stats = (await this.pc.getStats()) as unknown as Map<string, any>;
+      stats.forEach((report: any) => {
+        if (report.type === 'candidate-pair' && report.state === 'succeeded' && report.nominated) {
+          const local = stats.get(report.localCandidateId);
+          const remote = stats.get(report.remoteCandidateId);
+          console.log(
+            `[PeerConnection:${this.remoteId}] ICE pair: ${local?.candidateType}/${local?.protocol}` +
+              ` <-> ${remote?.candidateType}/${remote?.protocol}`
+          );
+        }
+      });
+    } catch {
+      // stats are best-effort diagnostics only
     }
   }
 

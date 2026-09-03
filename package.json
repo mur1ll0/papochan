@@ -16,6 +16,7 @@
     "build:desktop": "node scripts/build-all.mjs --target=desktop",
     "build:mobile": "node scripts/build-all.mjs --target=mobile",
     "test:call": "node scripts/test-call-simulation.mjs",
+    "test:mesh": "node scripts/test-mesh-negotiation.mjs",
     "mobile:sync": "cap sync",
     "mobile:android": "cap open android",
     "mobile:ios": "cap open ios"

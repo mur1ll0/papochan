@@ -79,6 +79,8 @@ export class MeshManager {
   private iceServers?: RTCIceServer[];
 
   private peers = new Map<string, PeerConnection>();
+  /** Creations still awaiting WebCrypto key derivation, keyed by node id. */
+  private pendingPeers = new Map<string, Promise<PeerConnection>>();
   private peerDataChannels = new Map<string, E2EEDataChannel>();
   private peerNodes = new Map<string, RemotePeerNode>();
   private mediaEngine: MediaEngine | null = null;
@@ -105,12 +107,18 @@ export class MeshManager {
   private setupSignalerEvents(): void {
     this.signaler.setEventListeners({
       onPeerJoined: async (remoteMeta) => {
+        if (!remoteMeta?.userId || !remoteMeta?.deviceId) return;
+
         const remoteNodeId = `${remoteMeta.userId}:${remoteMeta.deviceId}`;
         const localNodeId = `${this.localMeta.userId}:${this.localMeta.deviceId}`;
 
         if (remoteNodeId === localNodeId) return;
 
-        await this.getOrCreatePeer(remoteNodeId, remoteMeta);
+        try {
+          await this.getOrCreatePeer(remoteNodeId, remoteMeta);
+        } catch (err) {
+          this.reportSignalingFailure('peer-joined', remoteNodeId, err);
+        }
       },
 
       onPeerLeft: (peerId) => {
@@ -118,32 +126,48 @@ export class MeshManager {
       },
 
       onOffer: async (senderId, sdp, senderMeta) => {
-        const peer = await this.getOrCreatePeer(senderId, senderMeta);
-        const answer = await peer.handleOffer(sdp);
-        if (answer) {
-          await this.signaler.sendAnswer(senderId, answer);
+        try {
+          const peer = await this.getOrCreatePeer(senderId, senderMeta);
+          const answer = await peer.handleOffer(sdp);
+          if (answer) {
+            await this.signaler.sendAnswer(senderId, answer);
+          }
+        } catch (err) {
+          this.reportSignalingFailure('offer', senderId, err);
         }
       },
 
       onAnswer: async (senderId, sdp) => {
         const peer = this.peers.get(senderId);
-        if (peer) {
+        if (!peer) {
+          console.warn(`[MeshManager] Answer received for unknown peer ${senderId}, ignoring.`);
+          return;
+        }
+        try {
           await peer.handleAnswer(sdp);
+        } catch (err) {
+          this.reportSignalingFailure('answer', senderId, err);
         }
       },
 
       onCandidate: async (senderId, candidate) => {
         const peer = this.peers.get(senderId);
-        if (peer) {
+        if (!peer) return;
+        try {
           await peer.handleCandidate(candidate);
+        } catch (err) {
+          this.reportSignalingFailure('ice-candidate', senderId, err);
         }
       },
 
       onRenegotiate: async (senderId) => {
         const peer = this.peers.get(senderId);
-        if (peer && !peer.isPolite) {
+        if (!peer || peer.isPolite) return;
+        try {
           const offer = await peer.createOffer();
           await this.signaler.sendOffer(senderId, offer);
+        } catch (err) {
+          this.reportSignalingFailure('renegotiate', senderId, err);
         }
       },
 
@@ -176,16 +200,50 @@ export class MeshManager {
     });
   }
 
+  private reportSignalingFailure(stage: string, peerId: string, err: unknown): void {
+    const error = err instanceof Error ? err : new Error(String(err));
+    console.error(`[MeshManager] ${stage} handling failed for ${peerId}:`, error);
+    this.events.onError?.(error);
+  }
+
   /**
    * Retrieves or initializes a PeerConnection with the remote device node.
+   *
+   * Creation is serialized per node: the in-flight promise is registered
+   * synchronously, before the first `await`, so concurrent callers share one
+   * connection. Without this, `onPeerJoined` and `onOffer` arriving in the same
+   * signaling batch both pass the `peers.get()` guard while WebCrypto key
+   * derivation is pending and build duplicate RTCPeerConnections, which then
+   * emit competing ICE candidates and offers until the negotiation dies.
    */
-  private async getOrCreatePeer(
+  private getOrCreatePeer(
     remoteNodeId: string,
     remoteMeta: DeviceMetadata
   ): Promise<PeerConnection> {
     const existing = this.peers.get(remoteNodeId);
-    if (existing) return existing;
+    if (existing) return Promise.resolve(existing);
 
+    const inFlight = this.pendingPeers.get(remoteNodeId);
+    if (inFlight) return inFlight;
+
+    if (!remoteMeta?.publicKeyDh) {
+      return Promise.reject(
+        new Error(`Missing remote public key for peer ${remoteNodeId}; cannot derive session key.`)
+      );
+    }
+
+    const creation = this.createPeer(remoteNodeId, remoteMeta).finally(() => {
+      this.pendingPeers.delete(remoteNodeId);
+    });
+
+    this.pendingPeers.set(remoteNodeId, creation);
+    return creation;
+  }
+
+  private async createPeer(
+    remoteNodeId: string,
+    remoteMeta: DeviceMetadata
+  ): Promise<PeerConnection> {
     const localNodeId = `${this.localMeta.userId}:${this.localMeta.deviceId}`;
 
     // Derive symmetric E2EE session key for this pair
@@ -242,9 +300,14 @@ export class MeshManager {
       },
     });
 
-    // Create local data channel so SDP offer always contains SCTP application media section
-    const rawDc = peer.createDataChannel('ghost-e2ee-channel');
-    this.setupDataChannel(remoteNodeId, rawDc, sessionKey);
+    // Only the impolite side opens the channel. A single creator keeps exactly one
+    // SCTP stream per pair, guarantees the offer carries the application m-section,
+    // and removes the start-up offer glare; the polite side picks the same channel
+    // up through `ondatachannel`.
+    if (!peer.isPolite) {
+      const rawDc = peer.createDataChannel('ghost-e2ee-channel');
+      this.setupDataChannel(remoteNodeId, rawDc, sessionKey);
+    }
 
     // Attach currently active local tracks
     this.attachLocalTracksToPeer(peer);
@@ -291,6 +354,12 @@ export class MeshManager {
     sessionKey: CryptoKey
   ): void {
     const localSenderId = `${this.localMeta.userId}:${this.localMeta.deviceId}`;
+
+    const previous = this.peerDataChannels.get(peerId);
+    if (previous && previous.rawChannel !== rawChannel) {
+      previous.close();
+    }
+
     const dc = new E2EEDataChannel(
       rawChannel,
       localSenderId,
@@ -354,9 +423,13 @@ export class MeshManager {
     await this.signaler.sendStateUpdate(capabilities);
 
     // Apply to all peer connections
-    for (const [, peer] of this.peers.entries()) {
-      peer.syncLocalTracks(userStream, screenStream);
-    }
+    await Promise.all(
+      Array.from(this.peers.values()).map((peer) =>
+        peer.syncLocalTracks(userStream, screenStream).catch((err) => {
+          console.error(`[MeshManager] Track sync failed for ${peer.remoteId}:`, err);
+        })
+      )
+    );
   }
 
   private handleRemoteTrack(nodeId: string, track: MediaStreamTrack, stream: MediaStream): void {
@@ -477,6 +550,8 @@ export class MeshManager {
   }
 
   private removePeer(nodeId: string): void {
+    this.pendingPeers.delete(nodeId);
+
     const peer = this.peers.get(nodeId);
     if (peer) {
       peer.close();
@@ -609,6 +684,7 @@ export class MeshManager {
       dc.close();
     }
     this.peers.clear();
+    this.pendingPeers.clear();
     this.peerDataChannels.clear();
     this.peerNodes.clear();
   }
