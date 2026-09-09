@@ -60,8 +60,11 @@ export function VideoTile({
 }: VideoTileProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [isHovered, setIsHovered] = useState(false);
   const [fitMode, setFitMode] = useState<'contain' | 'cover'>('contain');
+  const [volume, setVolume] = useState(1);
+  const [isVolumeOpen, setIsVolumeOpen] = useState(false);
 
   useEffect(() => {
     const videoEl = videoRef.current;
@@ -95,6 +98,7 @@ export function VideoTile({
     if (audioEl.srcObject !== stream) {
       audioEl.srcObject = stream;
     }
+    audioEl.volume = volume;
     audioEl.play().catch((err) => {
       console.warn('[VideoTile] Remote audio play caught:', err);
     });
@@ -113,7 +117,38 @@ export function VideoTile({
       stream.removeEventListener('addtrack', handleTrackEvent);
       stream.removeEventListener('removetrack', handleTrackEvent);
     };
-  }, [stream, isLocal]);
+  }, [stream, isLocal, volume]);
+
+  // Per-participant output level. The device's own volume keys often will not
+  // touch this: mobile browsers route WebRTC playback through the voice-call
+  // stream, so turning the phone down leaves the call untouched.
+  useEffect(() => {
+    if (audioRef.current) {
+      audioRef.current.volume = volume;
+    }
+  }, [volume]);
+
+  useEffect(() => {
+    return () => {
+      if (longPressTimer.current) clearTimeout(longPressTimer.current);
+    };
+  }, []);
+
+  const openVolume = () => {
+    if (!isLocal && stream) setIsVolumeOpen(true);
+  };
+
+  const startLongPress = () => {
+    if (longPressTimer.current) clearTimeout(longPressTimer.current);
+    longPressTimer.current = setTimeout(openVolume, 500);
+  };
+
+  const cancelLongPress = () => {
+    if (longPressTimer.current) {
+      clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
+    }
+  };
 
   const hasLiveVideoTrack = stream ? stream.getVideoTracks().some((t) => t.readyState === 'live') : false;
   const isVideoVisible = isScreenShare ? hasLiveVideoTrack || !!stream : !isVideoMuted && (isLocal || hasLiveVideoTrack);
@@ -123,6 +158,15 @@ export function VideoTile({
     <div
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
+      onContextMenu={(e) => {
+        if (isLocal || !stream) return;
+        e.preventDefault();
+        openVolume();
+      }}
+      onTouchStart={startLongPress}
+      onTouchEnd={cancelLongPress}
+      onTouchMove={cancelLongPress}
+      onTouchCancel={cancelLongPress}
       className={cn(
         'relative group rounded-2xl overflow-hidden bg-slate-900 border transition-all duration-200 flex items-center justify-center select-none shadow-xl',
         isSpeaking
@@ -148,7 +192,11 @@ export function VideoTile({
           ref={videoRef}
           autoPlay
           playsInline
-          muted={isLocal} // Avoid local feedback echo
+          // Always muted: local playback would echo, and remote audio is played
+          // by the dedicated <audio> element so it has a single, controllable
+          // output. Leaving this unmuted made every remote peer audible twice,
+          // through two elements no volume control could reach together.
+          muted
           className={cn(
             'w-full h-full transition-all duration-200',
             fitMode === 'cover' ? 'object-cover' : 'object-contain',
@@ -182,6 +230,55 @@ export function VideoTile({
           <span className="mt-3 text-sm font-bold text-white">{username}</span>
           <span className="text-xs text-slate-400 mt-0.5">{deviceName}</span>
         </div>
+      )}
+
+      {/* Per-Participant Volume (right click on desktop, long press on touch) */}
+      {isVolumeOpen && !isLocal && stream && (
+        <>
+          <div
+            className="absolute inset-0 z-30"
+            onClick={() => setIsVolumeOpen(false)}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              setIsVolumeOpen(false);
+            }}
+          />
+          <div className="absolute z-40 left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-60 max-w-[85%] p-4 rounded-2xl bg-slate-950/95 backdrop-blur-md border border-slate-700 shadow-2xl">
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-xs font-bold text-slate-200 truncate">
+                {isScreenShare ? `${deviceName}` : username}
+              </span>
+              <span className="text-xs font-mono text-chan-turquoise">
+                {Math.round(volume * 100)}%
+              </span>
+            </div>
+
+            <div className="flex items-center gap-2.5">
+              <button
+                onClick={() => setVolume(volume === 0 ? 1 : 0)}
+                className="p-1.5 rounded-lg border border-slate-700 text-slate-300 hover:text-white hover:border-slate-500 transition-colors cursor-pointer shrink-0"
+                title={volume === 0 ? 'Reativar som' : 'Silenciar este participante'}
+              >
+                {volume === 0 ? <VolumeX className="w-4 h-4 text-rose-400" /> : <Volume2 className="w-4 h-4" />}
+              </button>
+
+              <input
+                type="range"
+                min={0}
+                max={1}
+                step={0.01}
+                value={volume}
+                onChange={(e) => setVolume(Number(e.target.value))}
+                className="flex-1 accent-papo-coral cursor-pointer"
+                aria-label="Volume"
+              />
+            </div>
+
+            <p className="mt-3 text-[11px] leading-snug text-slate-400">
+              Volume apenas deste dispositivo, no seu aparelho. Não afeta os outros participantes.
+            </p>
+          </div>
+        </>
       )}
 
       {/* Top Header Overlay: Device Info & E2EE badge */}
@@ -256,6 +353,22 @@ export function VideoTile({
               title="Trocar Posição (Inverter Palco)"
             >
               <ArrowLeftRight className="w-3.5 h-3.5" />
+            </button>
+          )}
+
+          {/* Local Output Volume (remote tiles only) */}
+          {!isLocal && stream && (
+            <button
+              onClick={openVolume}
+              className={cn(
+                'p-1.5 rounded-xl border transition-all cursor-pointer',
+                volume === 0
+                  ? 'bg-rose-950/80 border-rose-500/40 text-rose-400'
+                  : 'bg-slate-950/90 border-slate-800 hover:border-slate-600 text-slate-300 hover:text-white'
+              )}
+              title="Volume deste participante"
+            >
+              {volume === 0 ? <VolumeX className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5" />}
             </button>
           )}
 

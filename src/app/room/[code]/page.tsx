@@ -74,6 +74,25 @@ export default function RoomPage() {
   }, [hasJoined, rtc.admissionStatus, rtc.signalingState, rtc.peers.length, rtc.error, isHost, rtc.messages, rtc.sendMessage]);
 
 
+  // Switching camera or microphone replaces the local tracks wholesale:
+  // startUserMedia stops the old ones and, with the noise suppression pipeline
+  // on, hands back a brand new processed track from a brand new AudioContext.
+  // The RTCRtpSenders keep pointing at the stopped track, so the local meter
+  // still moves while the far side hears silence. Re-sync whenever the set of
+  // local track ids actually changes - muting reuses the same track, so this
+  // does not fire on every toggle.
+  const localTrackIds = [
+    ...(media.userStream?.getTracks() ?? []),
+    ...(media.screenStream?.getTracks() ?? []),
+  ]
+    .map((t) => t.id)
+    .join(',');
+
+  useEffect(() => {
+    if (!hasJoined || !localTrackIds) return;
+    rtc.syncTracks();
+  }, [localTrackIds, hasJoined, rtc.syncTracks]);
+
   // Track unread chat messages when chat drawer is closed
   useEffect(() => {
     if (!isChatOpen && rtc.messages.length > 0) {

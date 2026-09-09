@@ -263,6 +263,10 @@ jobs:
               fs.writeFileSync(stringsPath, s);
             }
           "
+          # The native project is regenerated on every build, so the template
+          # manifest comes back without camera/microphone permissions and the
+          # WebView cannot grant getUserMedia.
+          node scripts/patch-android-manifest.mjs
           npx cap sync android
 
       - name: Build Android APK
