@@ -264,9 +264,9 @@ jobs:
             }
           "
           # The native project is regenerated on every build, so the template
-          # manifest comes back without camera/microphone permissions and the
-          # WebView cannot grant getUserMedia.
-          node scripts/patch-android-manifest.mjs
+          # comes back without camera/microphone permissions (the WebView then
+          # cannot grant getUserMedia) and with versionName pinned at "1.0".
+          node scripts/patch-android-build.mjs
           npx cap sync android
 
       - name: Build Android APK

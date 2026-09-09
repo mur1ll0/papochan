@@ -174,12 +174,10 @@ export function getNativePlatform(): PlatformType | null {
 export async function getClientAppVersion(): Promise<string> {
   if (typeof window === 'undefined') return '1.0.0';
 
+  // The cache is a last resort, never the first answer: reading it first meant
+  // an app that had just been updated kept reporting the version it replaced,
+  // and went on prompting for an update it had already installed.
   try {
-    // Check localStorage override / cache
-    const cached = window.localStorage.getItem('papochan_native_version');
-    if (cached) return cached;
-
-    // Check custom global injected variables if present
     const win = window as unknown as Record<string, unknown>;
 
     if (win.__PAPOCHAN_APP_VERSION__ && typeof win.__PAPOCHAN_APP_VERSION__ === 'string') {
@@ -213,6 +211,9 @@ export async function getClientAppVersion(): Promise<string> {
       window.localStorage.setItem('papochan_native_version', tauri.appVersion);
       return tauri.appVersion;
     }
+
+    const cached = window.localStorage.getItem('papochan_native_version');
+    if (cached) return cached;
   } catch {
     // Ignore errors during runtime inspection
   }

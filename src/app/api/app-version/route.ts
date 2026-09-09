@@ -1,8 +1,31 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { PLATFORMS_CONFIG, PlatformType, compareSemver } from '@/lib/platform';
+import pkg from '../../../../package.json';
 
 export const dynamic = 'force-dynamic';
+
+
+/**
+ * The version actually shipped, taken from the one file the release pipeline
+ * already treats as the source of truth. This used to be a hardcoded '1.0.0' per
+ * platform, so the endpoint reported "you are up to date" forever no matter how
+ * many releases went out - which is exactly what it did after 2.0.0.
+ */
+const SHIPPED_VERSION: string = pkg.version;
+
+/**
+ * Oldest build still allowed to connect. Raise it to force an update when a
+ * release breaks compatibility with older clients.
+ */
+const MIN_SUPPORTED_VERSION: string = process.env.APP_MIN_VERSION?.trim() || '1.0.0';
+
+/** Download URL resolution, shared with the rest of the app (GitHub Releases). */
+function downloadUrlFor(platform: string): string {
+  const config = PLATFORMS_CONFIG[platform as PlatformType];
+  return config?.defaultDownloadUrl || '/downloads/papochan.apk';
+}
+
 
 interface DefaultReleaseInfo {
   platform: PlatformType;
@@ -16,41 +39,41 @@ interface DefaultReleaseInfo {
 const DEFAULT_RELEASES: Record<PlatformType, DefaultReleaseInfo> = {
   windows: {
     platform: 'windows',
-    minVersion: '1.0.0',
-    latestVersion: '1.0.0',
-    downloadUrl: process.env.NEXT_PUBLIC_DOWNLOAD_WINDOWS || '/downloads/papochan-setup.exe',
-    releaseNotes: 'Versão inicial do PapoChan para Windows com suporte a 60 FPS e Zero-Knowledge E2EE.',
+    minVersion: MIN_SUPPORTED_VERSION,
+    latestVersion: SHIPPED_VERSION,
+    downloadUrl: downloadUrlFor('windows'),
+    releaseNotes: 'Aplicativo nativo para Windows com compartilhamento de tela em 60 FPS e E2EE Zero-Knowledge.',
     isMandatory: false,
   },
   android: {
     platform: 'android',
-    minVersion: '1.0.0',
-    latestVersion: '1.0.0',
-    downloadUrl: process.env.NEXT_PUBLIC_DOWNLOAD_ANDROID || '/downloads/papochan.apk',
-    releaseNotes: 'Versão inicial do PapoChan para Android com supressão de ruído por IA e chamadas diretas.',
+    minVersion: MIN_SUPPORTED_VERSION,
+    latestVersion: SHIPPED_VERSION,
+    downloadUrl: downloadUrlFor('android'),
+    releaseNotes: 'Aplicativo Android com câmera, microfone, supressão de ruído neural e chamadas diretas.',
     isMandatory: false,
   },
   ios: {
     platform: 'ios',
-    minVersion: '1.0.0',
-    latestVersion: '1.0.0',
-    downloadUrl: process.env.NEXT_PUBLIC_DOWNLOAD_IOS || '/downloads/papochan.ipa',
-    releaseNotes: 'Versão inicial do PapoChan para iPhone / iPad com WebRTC Mesh e áudio em alta fidelidade.',
+    minVersion: MIN_SUPPORTED_VERSION,
+    latestVersion: SHIPPED_VERSION,
+    downloadUrl: downloadUrlFor('ios'),
+    releaseNotes: 'Aplicativo para iPhone / iPad com WebRTC Mesh e áudio em alta fidelidade.',
     isMandatory: false,
   },
   macos: {
     platform: 'macos',
-    minVersion: '1.0.0',
-    latestVersion: '1.0.0',
-    downloadUrl: process.env.NEXT_PUBLIC_DOWNLOAD_MACOS || '/downloads/papochan.dmg',
+    minVersion: MIN_SUPPORTED_VERSION,
+    latestVersion: SHIPPED_VERSION,
+    downloadUrl: downloadUrlFor('macos'),
     releaseNotes: 'Versão nativa para macOS com compartilhamento de tela e áudio interno.',
     isMandatory: false,
   },
   linux: {
     platform: 'linux',
-    minVersion: '1.0.0',
-    latestVersion: '1.0.0',
-    downloadUrl: process.env.NEXT_PUBLIC_DOWNLOAD_LINUX || '/downloads/papochan.AppImage',
+    minVersion: MIN_SUPPORTED_VERSION,
+    latestVersion: SHIPPED_VERSION,
+    downloadUrl: downloadUrlFor('linux'),
     releaseNotes: 'Versão Linux AppImage portátil com criptografia ponta a ponta.',
     isMandatory: false,
   },
