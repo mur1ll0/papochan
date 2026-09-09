@@ -168,11 +168,60 @@ export function getNativePlatform(): PlatformType | null {
   return detectOS();
 }
 
+const SHELL_VERSION_KEY = 'papochan_native_version';
+
+/**
+ * Version the native shell announced about itself, if it did.
+ *
+ * A shell does not serve the app - it loads the live site - so the JavaScript
+ * running inside always belongs to the newest web build and can tell nothing
+ * about the binary hosting it. The shell therefore states its own version, and
+ * it is baked in when that binary is built, which is exactly what "installed
+ * version" means.
+ *
+ * Two channels, so one failing is not silent: the user agent (Capacitor's
+ * appendUserAgent) and the URL the shell opens. The URL only survives the first
+ * load, so it is persisted; a newer binary announces a newer value and replaces
+ * it.
+ */
+export function parseShellVersionFromUserAgent(userAgent: string): string | null {
+  const match = userAgent.match(/PapoChanShell\/(\d+\.\d+\.\d+)/);
+  return match ? match[1] : null;
+}
+
+/**
+ * Persists the version carried on the URL. Runs at module load, before any
+ * effect: the parameter only exists on the very first navigation, and client
+ * side routing drops it as soon as the app moves.
+ */
+function captureShellVersionFromUrl(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const fromUrl = new URLSearchParams(window.location.search).get('shellVersion');
+    if (fromUrl && /^\d+\.\d+/.test(fromUrl)) {
+      window.localStorage.setItem(SHELL_VERSION_KEY, fromUrl);
+    }
+  } catch {
+    // Malformed URL or storage unavailable.
+  }
+}
+
+captureShellVersionFromUrl();
+
+function readAnnouncedShellVersion(): string | null {
+  if (typeof window === 'undefined') return null;
+  return parseShellVersionFromUserAgent(navigator.userAgent);
+}
+
 /**
  * Retrieves the version of the installed native wrapper if available.
  */
 export async function getClientAppVersion(): Promise<string> {
   if (typeof window === 'undefined') return '1.0.0';
+
+  // What the shell says about itself wins over everything else.
+  const announced = readAnnouncedShellVersion();
+  if (announced) return announced;
 
   // The cache is a last resort, never the first answer: reading it first meant
   // an app that had just been updated kept reporting the version it replaced,
@@ -181,7 +230,7 @@ export async function getClientAppVersion(): Promise<string> {
     const win = window as unknown as Record<string, unknown>;
 
     if (win.__PAPOCHAN_APP_VERSION__ && typeof win.__PAPOCHAN_APP_VERSION__ === 'string') {
-      window.localStorage.setItem('papochan_native_version', win.__PAPOCHAN_APP_VERSION__);
+      window.localStorage.setItem(SHELL_VERSION_KEY, win.__PAPOCHAN_APP_VERSION__);
       return win.__PAPOCHAN_APP_VERSION__;
     }
 
@@ -193,14 +242,14 @@ export async function getClientAppVersion(): Promise<string> {
     } | undefined;
 
     if (cap?.nativeAppVersion) {
-      window.localStorage.setItem('papochan_native_version', cap.nativeAppVersion);
+      window.localStorage.setItem(SHELL_VERSION_KEY, cap.nativeAppVersion);
       return cap.nativeAppVersion;
     }
 
     if (cap?.Plugins?.App?.getInfo) {
       const info = await cap.Plugins.App.getInfo();
       if (info?.version) {
-        window.localStorage.setItem('papochan_native_version', info.version);
+        window.localStorage.setItem(SHELL_VERSION_KEY, info.version);
         return info.version;
       }
     }
@@ -208,17 +257,21 @@ export async function getClientAppVersion(): Promise<string> {
     // Tauri Runtime Metadata check
     const tauri = win.__TAURI_INTERNALS__ as { appVersion?: string } | undefined;
     if (tauri?.appVersion) {
-      window.localStorage.setItem('papochan_native_version', tauri.appVersion);
+      window.localStorage.setItem(SHELL_VERSION_KEY, tauri.appVersion);
       return tauri.appVersion;
     }
 
-    const cached = window.localStorage.getItem('papochan_native_version');
+    const cached = window.localStorage.getItem(SHELL_VERSION_KEY);
     if (cached) return cached;
   } catch {
     // Ignore errors during runtime inspection
   }
 
-  return '1.0.0';
+  // Nothing could be determined. Reporting a real-looking version here would
+  // make a shell that cannot identify itself look permanently out of date, which
+  // is what produced an update prompt on every launch: every probe below failed
+  // and this literal was mistaken for the installed version.
+  return UNKNOWN_APP_VERSION;
 }
 
 
@@ -229,6 +282,12 @@ export async function getClientAppVersion(): Promise<string> {
  *  -1 if v1 < v2 (v1 is older)
  *   0 if v1 === v2
  */
+/**
+ * Returned when the shell never announced a version and no bridge answered.
+ * Callers must not treat it as a version to compare against a release.
+ */
+export const UNKNOWN_APP_VERSION = 'unknown';
+
 export function compareSemver(v1: string, v2: string): number {
   const clean1 = (v1 || '0.0.0').replace(/^v/, '').split('-')[0];
   const clean2 = (v2 || '0.0.0').replace(/^v/, '').split('-')[0];

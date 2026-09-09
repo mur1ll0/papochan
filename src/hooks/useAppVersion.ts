@@ -7,6 +7,7 @@ import {
   getNativePlatform,
   getClientAppVersion,
   compareSemver,
+  UNKNOWN_APP_VERSION,
 } from '@/lib/platform';
 import { getApiEndpoint } from '@/lib/api';
 
@@ -61,6 +62,16 @@ export function useAppVersion(): AppVersionState {
     try {
       const clientVer = await getClientAppVersion();
       setCurrentVersion(clientVer);
+
+      // A shell that never announced its version cannot be compared against a
+      // release: treating the unknown as 0.0.0 would mark it permanently out of
+      // date and prompt on every single launch, which is the bug this replaced.
+      if (clientVer === UNKNOWN_APP_VERSION) {
+        console.warn(
+          '[useAppVersion] The native shell did not report its version; skipping the update check.'
+        );
+        return;
+      }
 
       const endpoint = getApiEndpoint(
         `/api/app-version?platform=${encodeURIComponent(plat)}&clientVersion=${encodeURIComponent(clientVer)}`

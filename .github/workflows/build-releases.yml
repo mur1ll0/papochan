@@ -150,7 +150,11 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path out
-          $targetUrl = $env:NEXT_PUBLIC_APP_URL
+          # The shell announces its version on the URL: it loads the live site,
+          # so the app can learn nothing about the installed binary otherwise.
+          $shellVersion = '${{ needs.detect-major-bump.outputs.release_version }}'.TrimStart('v')
+          $sep = if ($env:NEXT_PUBLIC_APP_URL -like '*?*') { '&' } else { '?' }
+          $targetUrl = "$($env:NEXT_PUBLIC_APP_URL)$($sep)shell=windows&shellVersion=$shellVersion"
           $htmlContent = @"
           <!DOCTYPE html>
           <html>
@@ -232,8 +236,16 @@ jobs:
           <head>
             <meta charset="UTF-8">
             <script>
-              const targetUrl = '${{ env.NEXT_PUBLIC_APP_URL }}';
-              if (targetUrl) window.location.replace(targetUrl);
+              // The shell announces its version on the URL: it loads the live
+              // site, so the app can learn nothing about the installed binary.
+              const base = '${{ env.NEXT_PUBLIC_APP_URL }}';
+              const shellVersion = '${{ needs.detect-major-bump.outputs.release_version }}'.replace(/^v/, '');
+              if (base) {
+                const url = new URL(base);
+                url.searchParams.set('shell', 'desktop');
+                url.searchParams.set('shellVersion', shellVersion);
+                window.location.replace(url.toString());
+              }
             </script>
           </head>
           <body style="background:#020617;color:#fff;display:flex;align-items:center;justify-content:center;height:100vh;font-family:sans-serif;">
@@ -322,8 +334,16 @@ jobs:
           <head>
             <meta charset="UTF-8">
             <script>
-              const targetUrl = '${{ env.NEXT_PUBLIC_APP_URL }}';
-              if (targetUrl) window.location.replace(targetUrl);
+              // The shell announces its version on the URL: it loads the live
+              // site, so the app can learn nothing about the installed binary.
+              const base = '${{ env.NEXT_PUBLIC_APP_URL }}';
+              const shellVersion = '${{ needs.detect-major-bump.outputs.release_version }}'.replace(/^v/, '');
+              if (base) {
+                const url = new URL(base);
+                url.searchParams.set('shell', 'desktop');
+                url.searchParams.set('shellVersion', shellVersion);
+                window.location.replace(url.toString());
+              }
             </script>
           </head>
           <body style="background:#020617;color:#fff;display:flex;align-items:center;justify-content:center;height:100vh;font-family:sans-serif;">

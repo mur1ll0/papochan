@@ -16,6 +16,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { createRequire } from 'node:module';
+import { pathToFileURL } from 'node:url';
 
 const ROOT = resolve(import.meta.dirname, '..');
 
@@ -141,7 +142,7 @@ writeFileSync(
       baseUrl: '.',
       paths: { '@/*': ['./src/*'] },
     },
-    files: ['src/core/webrtc/MeshManager.ts', 'src/lib/turn.ts', 'src/core/crypto/keygen.ts', 'src/lib/environment.ts', 'src/core/signaling/SignalingClient.ts'],
+    files: ['src/core/webrtc/MeshManager.ts', 'src/lib/turn.ts', 'src/core/crypto/keygen.ts', 'src/lib/environment.ts', 'src/core/signaling/SignalingClient.ts', 'src/lib/platform.ts'],
   })
 );
 
@@ -640,6 +641,46 @@ function check(name, condition, detail) {
     'that stranger cannot then be impersonated either',
     !probe.isEnvelopeAuthentic(sign(attacker, { senderId: 'stranger:device' })),
     'key already pinned'
+  );
+}
+
+// --- Test 9: a native shell can report the version actually installed -------
+{
+  const { parseShellVersionFromUserAgent, UNKNOWN_APP_VERSION, compareSemver } =
+    requireCompiled(locate(outDir, 'platform.js'));
+  const { versionCodeFrom, patchGradle } = await import(
+    pathToFileURL(join(ROOT, 'scripts', 'patch-android-build.mjs')).href
+  );
+
+  check(
+    'the shell version is read from the user agent',
+    parseShellVersionFromUserAgent('Mozilla/5.0 (Linux; Android 14) PapoChanShell/2.0.0') === '2.0.0',
+    'Capacitor appendUserAgent'
+  );
+  check(
+    'an ordinary browser reports no shell version',
+    parseShellVersionFromUserAgent('Mozilla/5.0 (Windows NT 10.0) Chrome/120') === null,
+    'nothing to announce'
+  );
+  check(
+    'an unidentifiable shell is not mistaken for an old release',
+    UNKNOWN_APP_VERSION !== '1.0.0' && compareSemver(UNKNOWN_APP_VERSION, '2.0.0') !== 0,
+    UNKNOWN_APP_VERSION
+  );
+
+  // The APK must also carry that version, or the comparison has a wrong number
+  // on the other side.
+  const gradle = patchGradle('        versionCode 1\n        versionName "1.0"', '2.0.0');
+  check(
+    'the APK build carries the package version, not the template default',
+    gradle.includes('versionName "2.0.0"') && gradle.includes('versionCode 20000'),
+    gradle.trim().replace(/\s+/g, ' ')
+  );
+  check(
+    'versionCode increases with every release',
+    versionCodeFrom('2.0.0') > versionCodeFrom('1.9.9') &&
+      versionCodeFrom('2.1.3') > versionCodeFrom('2.1.2'),
+    'Android requires it to be monotonic'
   );
 }
 
