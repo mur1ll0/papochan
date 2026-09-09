@@ -15,6 +15,7 @@ import {
 import { signPayload, verifySignature } from '@/core/crypto/keygen';
 import { generateRoomCode } from '@/lib/utils';
 import { getApiEndpoint } from '@/lib/api';
+import { inboxChannelName } from '@/lib/environment';
 import { RingtoneSynthesizer } from '@/core/audio/RingtoneSynthesizer';
 
 export interface IncomingCallInfo {
@@ -81,7 +82,7 @@ export function useDirectCalls(
     const currentIdentity = identity;
 
     let isMounted = true;
-    const inboxChannelName = `inbox:${currentIdentity.deviceId}`;
+    const myInboxChannel = inboxChannelName(currentIdentity.deviceId);
 
     async function initInbox() {
       try {
@@ -97,7 +98,7 @@ export function useDirectCalls(
         });
 
         ablyClientRef.current = client;
-        const channel = client.channels.get(inboxChannelName);
+        const channel = client.channels.get(myInboxChannel);
         inboxChannelRef.current = channel;
 
         await channel.subscribe('direct-call', async (message: Ably.Message) => {
@@ -213,7 +214,7 @@ export function useDirectCalls(
         secretKeyEd
       );
 
-      const recipientInbox = ablyClientRef.current.channels.get(`inbox:${contact.deviceId}`);
+      const recipientInbox = ablyClientRef.current.channels.get(inboxChannelName(contact.deviceId));
 
       RingtoneSynthesizer.startOutgoingDialTone();
 
@@ -266,7 +267,7 @@ export function useDirectCalls(
     RingtoneSynthesizer.stop();
 
     // Notify caller that we accepted
-    const callerInbox = ablyClientRef.current.channels.get(`inbox:${incomingCall.callerDeviceId}`);
+    const callerInbox = ablyClientRef.current.channels.get(inboxChannelName(incomingCall.callerDeviceId));
     await callerInbox.publish('direct-call', {
       type: 'call-accept',
       callId: incomingCall.callId,
@@ -285,7 +286,7 @@ export function useDirectCalls(
 
     RingtoneSynthesizer.stop();
 
-    const callerInbox = ablyClientRef.current.channels.get(`inbox:${incomingCall.callerDeviceId}`);
+    const callerInbox = ablyClientRef.current.channels.get(inboxChannelName(incomingCall.callerDeviceId));
     await callerInbox.publish('direct-call', {
       type: 'call-reject',
       callId: incomingCall.callId,
@@ -302,7 +303,7 @@ export function useDirectCalls(
     RingtoneSynthesizer.stop();
     if (callTimeoutRef.current) clearTimeout(callTimeoutRef.current);
 
-    const recipientInbox = ablyClientRef.current.channels.get(`inbox:${outgoingCall.contact.deviceId}`);
+    const recipientInbox = ablyClientRef.current.channels.get(inboxChannelName(outgoingCall.contact.deviceId));
     await recipientInbox.publish('direct-call', {
       type: 'call-cancel',
       callId: outgoingCall.callId,

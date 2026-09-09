@@ -141,7 +141,7 @@ writeFileSync(
       baseUrl: '.',
       paths: { '@/*': ['./src/*'] },
     },
-    files: ['src/core/webrtc/MeshManager.ts', 'src/lib/turn.ts', 'src/core/crypto/keygen.ts'],
+    files: ['src/core/webrtc/MeshManager.ts', 'src/lib/turn.ts', 'src/core/crypto/keygen.ts', 'src/lib/environment.ts'],
   })
 );
 
@@ -534,6 +534,50 @@ function check(name, condition, detail) {
     constructedPeerConnections === 1,
     `constructed=${constructedPeerConnections}`
   );
+}
+
+// --- Test 7: development traffic can never meet production traffic ----------
+{
+  const envFile = locate(outDir, 'environment.js');
+  const load = (nodeEnv, override) => {
+    delete requireCompiled.cache[requireCompiled.resolve(envFile)];
+    process.env.NODE_ENV = nodeEnv;
+    if (override === undefined) delete process.env.NEXT_PUBLIC_SIGNALING_NAMESPACE;
+    else process.env.NEXT_PUBLIC_SIGNALING_NAMESPACE = override;
+    return requireCompiled(envFile);
+  };
+
+  const CODE = 'ABC-DEF-GHI';
+  const prod = load('production');
+  const dev = load('development');
+
+  check(
+    'dev and prod resolve different room channels',
+    prod.roomChannelName(CODE) !== dev.roomChannelName(CODE),
+    `${prod.roomChannelName(CODE)} vs ${dev.roomChannelName(CODE)}`
+  );
+  check(
+    'dev and prod resolve different inbox channels',
+    prod.inboxChannelName('d1') !== dev.inboxChannelName('d1'),
+    `${prod.inboxChannelName('d1')} vs ${dev.inboxChannelName('d1')}`
+  );
+  check(
+    'dev and prod store different room codes',
+    prod.namespacedRoomCode(CODE) !== dev.namespacedRoomCode(CODE),
+    `${prod.namespacedRoomCode(CODE)} vs ${dev.namespacedRoomCode(CODE)}`
+  );
+  check(
+    'production room codes are unchanged, so existing rooms keep working',
+    prod.namespacedRoomCode(CODE) === CODE,
+    prod.namespacedRoomCode(CODE)
+  );
+  check(
+    'a namespace that would widen an Ably capability is rejected',
+    load('development', 'prod; inbox:*').SIGNALING_NAMESPACE === 'dev',
+    'falls back to dev'
+  );
+
+  delete process.env.NEXT_PUBLIC_SIGNALING_NAMESPACE;
 }
 
 rmSync(outDir, { recursive: true, force: true });

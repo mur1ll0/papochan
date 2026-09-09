@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { checkRateLimit } from '@/lib/rateLimit';
 import { db } from '@/lib/db';
 import { getAblyRestClient } from '@/lib/ably';
+import { roomChannelName } from '@/lib/environment';
 
 // In-Memory Signaling Bus Cache with TTL
 interface StoredSignal {
@@ -206,7 +207,7 @@ export async function POST(req: NextRequest) {
       if (process.env.ABLY_API_KEY && !process.env.ABLY_API_KEY.includes('mock-ably-key')) {
         try {
           const ably = getAblyRestClient();
-          const channel = ably.channels.get(`ghost:room:${code}`);
+          const channel = ably.channels.get(roomChannelName(code));
           channel.publish('signal', envelope).catch(() => {});
         } catch (ablyErr) {
           console.warn('[Signaling:POST] Ably bridge error:', ablyErr);

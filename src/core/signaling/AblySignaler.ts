@@ -8,6 +8,7 @@ import {
 } from './SignalingClient';
 import { signPayload, verifySignature, canonicalJsonStringify } from '../crypto/keygen';
 import { getApiEndpoint } from '@/lib/api';
+import { roomChannelName } from '@/lib/environment';
 
 export class AblySignaler extends SignalingClient {
   private client: Ably.Realtime | null = null;
@@ -87,7 +88,7 @@ export class AblySignaler extends SignalingClient {
       // No `rewind`: replaying signaling history re-delivers stale SDP and ICE
       // for connections that already moved on. Presence plus the explicit
       // presence-announce below is enough for mesh convergence.
-      const channelName = `ghost:room:${roomCode}`;
+      const channelName = roomChannelName(roomCode);
       this.channel = this.client.channels.get(channelName);
 
       // Subscribe to signal messages

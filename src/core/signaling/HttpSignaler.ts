@@ -7,6 +7,7 @@ import {
 } from './SignalingClient';
 import { signPayload, verifySignature, canonicalJsonStringify } from '../crypto/keygen';
 import { getApiEndpoint } from '@/lib/api';
+import { namespacedRoomCode } from '@/lib/environment';
 
 function clientIdOf(meta: DeviceMetadata | null): string {
   return meta ? `${meta.userId}:${meta.deviceId}` : '';
@@ -40,7 +41,9 @@ export class HttpSignaler extends SignalingClient {
     localMeta: DeviceMetadata,
     secretKeyEd: Uint8Array
   ): Promise<void> {
-    this.roomCode = roomCode.toUpperCase();
+    // Namespaced: this is what reaches the `roomCode` column, so a dev room and
+    // a production room can never be the same row.
+    this.roomCode = namespacedRoomCode(roomCode);
     this.localMeta = localMeta;
     this.secretKeyEd = secretKeyEd;
     this.lastPollTimestamp = Date.now() - 10000;

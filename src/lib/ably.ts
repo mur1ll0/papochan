@@ -1,4 +1,5 @@
 import * as Ably from 'ably';
+import { inboxChannelName, inboxWildcard, roomChannelName } from './environment';
 
 export function getAblyRestClient(): Ably.Rest {
   const apiKey = process.env.ABLY_API_KEY;
@@ -24,16 +25,17 @@ export async function createAblyTokenRequest(
   // A wildcard or colon slipped into these would widen the grant, so only plain
   // identifiers ever reach a capability key.
   if (SAFE_SEGMENT.test(roomCode)) {
-    capability[`ghost:room:${roomCode}`] = ['publish', 'subscribe', 'presence'];
+    capability[roomChannelName(roomCode)] = ['publish', 'subscribe', 'presence'];
   }
 
   if (deviceId && SAFE_SEGMENT.test(deviceId)) {
     // Own inbox: receive incoming call invites.
-    capability[`inbox:${deviceId}`] = ['publish', 'subscribe', 'presence'];
+    capability[inboxChannelName(deviceId)] = ['publish', 'subscribe', 'presence'];
     // Any other inbox: publish only, which is what ringing someone means. You
     // can place a call but never eavesdrop on someone else's invites, and the
     // invite itself is Ed25519-signed so the callee verifies who is calling.
-    capability['inbox:*'] = ['publish'];
+    // Scoped to this environment, so a dev client cannot ring a production one.
+    capability[inboxWildcard()] = ['publish'];
   }
 
   const tokenParams: Ably.TokenParams = {
