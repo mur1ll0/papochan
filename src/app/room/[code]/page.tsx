@@ -11,6 +11,7 @@ import {
   Sparkles,
 } from 'lucide-react';
 import { useCrypto } from '@/hooks/useCrypto';
+import { useDirectCalls } from '@/hooks/useDirectCalls';
 import { useMediaDevices } from '@/hooks/useMediaDevices';
 import { useWebRTC } from '@/hooks/useWebRTC';
 import { useI18n } from '@/i18n/context';
@@ -22,6 +23,11 @@ import { DeviceSetupModal } from '@/components/auth/DeviceSetupModal';
 import { WaitingRoomOverlay } from '@/components/call/WaitingRoomOverlay';
 import { KnockApprovalModal } from '@/components/call/KnockApprovalModal';
 import { AudioDiagnosticsAlert } from '@/components/call/AudioDiagnosticsAlert';
+import { ParticipantsPanel } from '@/components/call/ParticipantsPanel';
+import { SaveContactModal } from '@/components/contacts/SaveContactModal';
+import { IncomingCallModal } from '@/components/call/IncomingCallModal';
+import { RemotePeerNode } from '@/core/webrtc/MeshManager';
+import { TrustedContact } from '@/core/crypto/storage';
 import { ChameleonLogo } from '@/components/brand/ChameleonLogo';
 import { cn } from '@/lib/utils';
 
@@ -48,6 +54,20 @@ export default function RoomPage() {
   const [isSecurityOpen, setIsSecurityOpen] = useState<boolean>(false);
   const [copiedLink, setCopiedLink] = useState<boolean>(false);
   const [unreadChatCount, setUnreadChatCount] = useState<number>(0);
+  const [isParticipantsOpen, setIsParticipantsOpen] = useState<boolean>(false);
+  const [peerToSave, setPeerToSave] = useState<RemotePeerNode | null>(null);
+
+  // Devices allowed straight in: the one dialed on the way here, plus anyone we
+  // ring into the room from the contacts vault while the call is running.
+  const [invitedDeviceIds, setInvitedDeviceIds] = useState<string[]>(
+    invitedDeviceId ? [invitedDeviceId] : []
+  );
+
+  const admitDevice = React.useCallback((deviceId: string) => {
+    setInvitedDeviceIds((prev) => (prev.includes(deviceId) ? prev : [...prev, deviceId]));
+  }, []);
+
+  const directCalls = useDirectCalls(identity, { onInviteAccepted: admitDevice });
 
   const rtc = useWebRTC({
     roomCode,
@@ -55,7 +75,7 @@ export default function RoomPage() {
     mediaEngine: media.engine,
     autoJoin: hasJoined,
     isHost,
-    autoAdmitDeviceId: invitedDeviceId,
+    autoAdmitDeviceIds: invitedDeviceIds,
   });
 
   useEffect(() => {
@@ -102,6 +122,19 @@ export default function RoomPage() {
       }
     }
   }, [rtc.messages, isChatOpen, identity]);
+
+  const handleInviteContact = async (contact: TrustedContact) => {
+    // Clear the gate before ringing: they accept on their own device and walk
+    // straight in, rather than landing in a waiting room we would have to
+    // approve them out of.
+    admitDevice(contact.deviceId);
+    await directCalls.callContact(contact, roomCode);
+  };
+
+  const handleSaveContact = async (contact: TrustedContact) => {
+    await directCalls.saveContact(contact);
+    setPeerToSave(null);
+  };
 
   const handleToggleChat = () => {
     if (!isChatOpen) setUnreadChatCount(0);
@@ -272,11 +305,15 @@ export default function RoomPage() {
 
         {/* Right: Security & Network Status */}
         <div className="flex items-center gap-3">
-          {/* Peer Count */}
-          <div className="flex items-center gap-2 text-xs sm:text-sm text-slate-200 font-bold bg-slate-900 px-3 py-1.5 rounded-full border border-slate-800 shadow-sm">
+          {/* Peer Count - opens the participants panel */}
+          <button
+            onClick={() => setIsParticipantsOpen(true)}
+            className="flex items-center gap-2 text-xs sm:text-sm text-slate-200 font-bold bg-slate-900 px-3 py-1.5 rounded-full border border-slate-800 shadow-sm hover:border-slate-600 transition-colors cursor-pointer"
+            title={t('room.header.participants')}
+          >
             <Users className="w-4 h-4 text-papo-coral" />
             <span>{rtc.peers.length + 1}</span>
-          </div>
+          </button>
 
           {/* E2EE Shield Pill */}
           <button
@@ -355,6 +392,34 @@ export default function RoomPage() {
         onLeaveCall={handleLeaveCall}
         onSwitchDevice={media.switchDevice}
         onSetNoiseSuppressionMode={media.setNoiseSuppressionMode}
+      />
+
+      {/* Participants: save someone from the call, or ring a contact into it */}
+      <ParticipantsPanel
+        isOpen={isParticipantsOpen}
+        onClose={() => setIsParticipantsOpen(false)}
+        localIdentity={identity}
+        peers={rtc.peers}
+        contacts={directCalls.contacts}
+        ringingContactId={directCalls.outgoingCall?.contact.id ?? null}
+        onSavePeer={setPeerToSave}
+        onInviteContact={handleInviteContact}
+      />
+
+      {peerToSave && (
+        <SaveContactModal
+          isOpen
+          onClose={() => setPeerToSave(null)}
+          peer={peerToSave}
+          onSave={handleSaveContact}
+        />
+      )}
+
+      {/* Someone can ring us while we are already in a call */}
+      <IncomingCallModal
+        call={directCalls.incomingCall}
+        onAccept={directCalls.acceptIncomingCall}
+        onReject={directCalls.rejectIncomingCall}
       />
 
       {/* Zero-Knowledge End-to-End Cryptographic Security Modal */}

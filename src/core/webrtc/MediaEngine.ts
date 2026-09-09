@@ -78,6 +78,41 @@ export class MediaEngine {
   public setNoiseSuppressionMode(mode: NoiseSuppressionMode): void {
     this.noiseSuppressionMode = mode;
     this.noiseSuppressionEngine?.setMode(mode);
+    this.applyCaptureCleanup();
+  }
+
+  /**
+   * Decides who cleans up the microphone: the browser's capture-stage DSP, or
+   * our own Web Audio chain.
+   *
+   * Running both is what makes voices sound robotic. The browser's automatic
+   * gain control rides the level continuously, then our compressor squashes the
+   * same signal again - two gain controllers fighting over one voice produce the
+   * pumping, metallic artefact. Its spectral noise gate plus our notch and
+   * lowpass add musical noise on top. Double processing also flattened the
+   * difference between our own modes, since the browser was doing the heavy
+   * lifting underneath whichever one was selected.
+   *
+   * Echo cancellation always stays on: it needs the far-end reference that only
+   * the capture stage has, and cannot be reproduced in Web Audio.
+   */
+  private captureCleanupConstraints(): MediaTrackConstraints {
+    const browserHandlesCleanup = this.noiseSuppressionMode === 'off';
+    return {
+      echoCancellation: this.config.enableEchoCancellation ?? true,
+      noiseSuppression: this.config.enableNoiseSuppression ?? browserHandlesCleanup,
+      autoGainControl: this.config.enableAutoGainControl ?? browserHandlesCleanup,
+    };
+  }
+
+  /** Retunes the live capture track when the mode changes mid-call. */
+  private applyCaptureCleanup(): void {
+    const track = this.rawUserStream?.getAudioTracks()[0];
+    if (!track || track.readyState !== 'live') return;
+
+    track
+      .applyConstraints(this.captureCleanupConstraints())
+      .catch((err) => console.warn('[MediaEngine] Could not retune capture cleanup:', err));
   }
 
   public static async listDevices(): Promise<MediaDevicesList> {
@@ -135,9 +170,7 @@ export class MediaEngine {
 
     const audioConstraints: MediaTrackConstraints | boolean = {
       deviceId: this.config.audioDeviceId ? { exact: this.config.audioDeviceId } : undefined,
-      echoCancellation: this.config.enableEchoCancellation ?? true,
-      noiseSuppression: this.config.enableNoiseSuppression ?? true,
-      autoGainControl: this.config.enableAutoGainControl ?? true,
+      ...this.captureCleanupConstraints(),
     };
 
     const videoConstraints: MediaTrackConstraints | boolean = {

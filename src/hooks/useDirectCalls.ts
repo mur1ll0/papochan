@@ -36,9 +36,22 @@ export interface OutgoingCallInfo {
   contact: TrustedContact;
   status: 'dialing' | 'ringing' | 'rejected' | 'busy' | 'timeout';
   startedAt: number;
+  /** True when ringing someone into a room we are already sitting in. */
+  inRoom?: boolean;
 }
 
-export function useDirectCalls(identity: SerializedIdentity | null) {
+export interface UseDirectCallsOptions {
+  /**
+   * Fired when someone we invited into our current room accepts. They answered
+   * the ringing screen, so the room admits that device without a second prompt.
+   */
+  onInviteAccepted?: (calleeDeviceId: string) => void;
+}
+
+export function useDirectCalls(
+  identity: SerializedIdentity | null,
+  options: UseDirectCallsOptions = {}
+) {
   const router = useRouter();
   const [contacts, setContacts] = useState<TrustedContact[]>([]);
   const [incomingCall, setIncomingCall] = useState<IncomingCallInfo | null>(null);
@@ -47,6 +60,10 @@ export function useDirectCalls(identity: SerializedIdentity | null) {
   const ablyClientRef = useRef<Ably.Realtime | null>(null);
   const inboxChannelRef = useRef<Ably.RealtimeChannel | null>(null);
   const callTimeoutRef = useRef<any>(null);
+  /** callIds that ring someone into the room we are already in. */
+  const inRoomInvitesRef = useRef<Set<string>>(new Set());
+  const onInviteAcceptedRef = useRef(options.onInviteAccepted);
+  onInviteAcceptedRef.current = options.onInviteAccepted;
 
   const refreshContacts = useCallback(async () => {
     const list = await getTrustedContacts();
@@ -129,6 +146,14 @@ export function useDirectCalls(identity: SerializedIdentity | null) {
             if (callTimeoutRef.current) clearTimeout(callTimeoutRef.current);
             const calleeDeviceId = message.data?.calleeDeviceId;
             setOutgoingCall(null);
+
+            if (inRoomInvitesRef.current.has(callId)) {
+              // We are already in this room; just clear the gate for them.
+              inRoomInvitesRef.current.delete(callId);
+              if (calleeDeviceId) onInviteAcceptedRef.current?.(calleeDeviceId);
+              return;
+            }
+
             // The caller owns the room it created, so it enters as host. It also
             // carries the id of the device it dialed: that peer already consented
             // by answering, so asking the caller to approve it again is a second
@@ -166,13 +191,21 @@ export function useDirectCalls(identity: SerializedIdentity | null) {
   }, [identity, router]);
 
   // Initiate outgoing direct call to a contact
+  /**
+   * Rings a saved contact. Pass `existingRoomCode` to pull them into the call we
+   * are already in instead of opening a fresh room.
+   */
   const callContact = useCallback(
-    async (contact: TrustedContact) => {
+    async (contact: TrustedContact, existingRoomCode?: string) => {
       if (!identity || !ablyClientRef.current) return;
 
       const callId = crypto.randomUUID();
-      const roomCode = generateRoomCode();
+      const roomCode = existingRoomCode || generateRoomCode();
       const timestamp = Date.now();
+
+      if (existingRoomCode) {
+        inRoomInvitesRef.current.add(callId);
+      }
 
       const secretKeyEd = decodeBase64(identity.privateKeyEd);
       const signature = signPayload(
@@ -190,6 +223,7 @@ export function useDirectCalls(identity: SerializedIdentity | null) {
         contact,
         status: 'ringing',
         startedAt: timestamp,
+        inRoom: Boolean(existingRoomCode),
       });
 
       // Send call invite to recipient's private inbox channel

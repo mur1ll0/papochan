@@ -155,6 +155,7 @@ export const translations = {
     'room.header.copyLink': 'Copiar Link',
     'room.header.copied': 'Copiado!',
     'room.header.sisterDevice': 'Dispositivo Irmão Conectado',
+    'room.header.participants': 'Participantes e contatos',
 
     // Navigation & Downloads
     'nav.downloadApp': 'Baixar App',
@@ -354,6 +355,7 @@ export const translations = {
     'room.header.copyLink': 'Copy Link',
     'room.header.copied': 'Copied!',
     'room.header.sisterDevice': 'Sister Device Connected',
+    'room.header.participants': 'Participants and contacts',
 
     // Navigation & Downloads
     'nav.downloadApp': 'Download App',

@@ -42,19 +42,23 @@ export class NoiseSuppressionEngine {
     this.notchFilter.frequency.setValueAtTime(60, this.audioContext.currentTime);
     this.notchFilter.Q.setValueAtTime(4.0, this.audioContext.currentTime);
 
-    // 3. Lowpass filter: 12.5 kHz (removes electronic hiss above human voice band)
+    // 3. Lowpass filter: 14 kHz (removes electronic hiss above the human voice
+    //    band). Cutting lower than this audibly dulls sibilants, which reads as
+    //    a telephone or "processed" quality.
     this.lowpassFilter = this.audioContext.createBiquadFilter();
     this.lowpassFilter.type = 'lowpass';
-    this.lowpassFilter.frequency.setValueAtTime(12500, this.audioContext.currentTime);
+    this.lowpassFilter.frequency.setValueAtTime(14000, this.audioContext.currentTime);
     this.lowpassFilter.Q.setValueAtTime(0.7, this.audioContext.currentTime);
 
-    // 4. Dynamics Compressor: smooths voice peaks and brings quiet speech up
+    // 4. Dynamics Compressor: smooths voice peaks and brings quiet speech up.
+    //    A 3 ms attack clamps down on every syllable onset and pumps audibly;
+    //    12 ms lets transients through and keeps speech sounding natural.
     this.compressor = this.audioContext.createDynamicsCompressor();
-    this.compressor.threshold.setValueAtTime(-26, this.audioContext.currentTime);
+    this.compressor.threshold.setValueAtTime(-24, this.audioContext.currentTime);
     this.compressor.knee.setValueAtTime(12, this.audioContext.currentTime);
-    this.compressor.ratio.setValueAtTime(3.5, this.audioContext.currentTime);
-    this.compressor.attack.setValueAtTime(0.003, this.audioContext.currentTime);
-    this.compressor.release.setValueAtTime(0.15, this.audioContext.currentTime);
+    this.compressor.ratio.setValueAtTime(2.5, this.audioContext.currentTime);
+    this.compressor.attack.setValueAtTime(0.012, this.audioContext.currentTime);
+    this.compressor.release.setValueAtTime(0.18, this.audioContext.currentTime);
 
     // 5. Output Gain
     this.gainNode = this.audioContext.createGain();
@@ -116,7 +120,7 @@ export class NoiseSuppressionEngine {
         .connect(this.destinationNode);
     } else if (this.currentMode === 'ai-neural') {
       // Full AI multi-stage filter (Rumble Cut + 60Hz Notch + De-hiss + Dynamics Compressor + Auto Make-up Gain)
-      this.gainNode.gain.setValueAtTime(1.2, now); // Gentle +1.6dB speech boost
+      this.gainNode.gain.setValueAtTime(1.1, now); // Gentle +0.8dB make-up
       this.sourceNode
         .connect(this.highpassFilter)
         .connect(this.notchFilter)

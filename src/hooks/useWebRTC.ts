@@ -34,12 +34,12 @@ export interface UseWebRTCOptions {
   autoJoin?: boolean;
   isHost?: boolean;
   /**
-   * Device id this client dialed in a direct call. That peer already consented
-   * by answering the ringing screen, so prompting the caller to approve it
-   * again is a second confirmation for one decision. Every other device still
-   * has to knock.
+   * Device ids this client invited - the one dialed in a direct call, plus any
+   * contact rung into the room mid-call. They already consented by answering the
+   * ringing screen, so prompting again is a second confirmation for one
+   * decision. Every other device still has to knock.
    */
-  autoAdmitDeviceId?: string | null;
+  autoAdmitDeviceIds?: string[];
 }
 
 export function useWebRTC({
@@ -48,7 +48,7 @@ export function useWebRTC({
   mediaEngine,
   autoJoin = true,
   isHost = false,
-  autoAdmitDeviceId = null,
+  autoAdmitDeviceIds,
 }: UseWebRTCOptions) {
   const [signalingState, setSignalingState] = useState<
     'idle' | 'connecting' | 'connected' | 'disconnected' | 'failed'
@@ -68,6 +68,10 @@ export function useWebRTC({
   const signalerRef = useRef<SignalingClient | null>(null);
   const knockIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const emptyRoomTimerRef = useRef<NodeJS.Timeout | null>(null);
+  // Read through a ref: the knock handler is created once at join time, and
+  // contacts can be invited long after that.
+  const autoAdmitRef = useRef<string[]>(autoAdmitDeviceIds ?? []);
+  autoAdmitRef.current = autoAdmitDeviceIds ?? [];
 
   const clearAdmissionTimers = useCallback(() => {
     if (knockIntervalRef.current) {
@@ -197,9 +201,9 @@ export function useWebRTC({
             signaler.sendKnockApproved(request.senderId);
             return;
           }
-          // Auto-approve the exact device we dialed in a direct call.
-          if (autoAdmitDeviceId && request.meta.deviceId === autoAdmitDeviceId) {
-            console.log('[DEBUG-RTC] Auto-admitting dialed device:', request.senderId);
+          // Auto-approve a device we explicitly invited.
+          if (request.meta.deviceId && autoAdmitRef.current.includes(request.meta.deviceId)) {
+            console.log('[DEBUG-RTC] Auto-admitting invited device:', request.senderId);
             meshManagerRef.current?.admitPeer(request.senderId);
             signaler.sendKnockApproved(request.senderId);
             return;
@@ -286,7 +290,7 @@ export function useWebRTC({
       setAdmissionStatus('rejected');
       setError(err.message || 'Failed to connect to signaling');
     }
-  }, [roomCode, identity, mediaEngine, isHost, autoAdmitDeviceId, clearAdmissionTimers]);
+  }, [roomCode, identity, mediaEngine, isHost, clearAdmissionTimers]);
 
 
   const leave = useCallback(async () => {
