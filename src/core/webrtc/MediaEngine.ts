@@ -561,10 +561,6 @@ export class MediaEngine {
     return this.processedUserStream || this.rawUserStream;
   }
 
-  public getRawUserStream(): MediaStream | null {
-    return this.rawUserStream;
-  }
-
   public getScreenStream(): MediaStream | null {
     return this.screenStream;
   }

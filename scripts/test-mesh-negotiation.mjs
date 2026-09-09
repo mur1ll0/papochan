@@ -141,7 +141,7 @@ writeFileSync(
       baseUrl: '.',
       paths: { '@/*': ['./src/*'] },
     },
-    files: ['src/core/webrtc/MeshManager.ts', 'src/lib/turn.ts', 'src/core/crypto/keygen.ts', 'src/lib/environment.ts'],
+    files: ['src/core/webrtc/MeshManager.ts', 'src/lib/turn.ts', 'src/core/crypto/keygen.ts', 'src/lib/environment.ts', 'src/core/signaling/SignalingClient.ts'],
   })
 );
 
@@ -578,6 +578,69 @@ function check(name, condition, detail) {
   );
 
   delete process.env.NEXT_PUBLIC_SIGNALING_NAMESPACE;
+}
+
+// --- Test 8: forged signaling is rejected, not merely logged ----------------
+{
+  const { SignalingClient } = requireCompiled(locate(outDir, 'SignalingClient.js'));
+  const { canonicalJsonStringify, signPayload } = requireCompiled(locate(outDir, 'keygen.js'));
+
+  // Minimal concrete subclass; only the authentication path is under test.
+  class Probe extends SignalingClient {}
+  const probe = new Probe();
+
+  const victim = nacl.sign.keyPair();
+  const attacker = nacl.sign.keyPair();
+
+  const sign = (keyPair, overrides = {}) => {
+    const base = {
+      type: 'knock-approved',
+      senderId: 'victim-user:victim-device',
+      targetId: undefined,
+      roomCode: 'ROOM',
+      timestamp: Date.now(),
+      payload: { approved: true, approvedId: 'attacker-device' },
+      publicKeyEd: encodeBase64(keyPair.publicKey),
+    };
+    const e = { ...base, ...overrides };
+    const msg = `${e.type}|${e.senderId}|${e.targetId || '*'}|${e.roomCode}|${e.timestamp}|${canonicalJsonStringify(e.payload)}`;
+    return { ...e, signature: signPayload(msg, keyPair.secretKey) };
+  };
+
+  const genuine = sign(victim);
+  check('a correctly signed envelope is accepted', probe.isEnvelopeAuthentic(genuine), genuine.type);
+
+  const tampered = { ...sign(victim), payload: { approved: true, approvedId: 'someone-else' } };
+  check(
+    'tampering with the payload invalidates the envelope',
+    !probe.isEnvelopeAuthentic(tampered),
+    'signature no longer covers it'
+  );
+
+  // The attacker signs correctly - with their own key - while claiming to be the
+  // victim. The signature verifies; only the pinned key catches it.
+  const spoofed = sign(attacker);
+  check(
+    'a valid signature under a different key cannot impersonate a pinned sender',
+    !probe.isEnvelopeAuthentic(spoofed),
+    'key pinned on first contact'
+  );
+
+  check(
+    'an envelope with no signature is rejected',
+    !probe.isEnvelopeAuthentic({ ...genuine, signature: undefined }),
+    'nothing to verify'
+  );
+
+  // A sender nobody has seen yet is trusted on first contact, then pinned.
+  const stranger = nacl.sign.keyPair();
+  const first = sign(stranger, { senderId: 'stranger:device' });
+  check('an unknown sender is pinned on first contact', probe.isEnvelopeAuthentic(first), 'trust on first use');
+  check(
+    'that stranger cannot then be impersonated either',
+    !probe.isEnvelopeAuthentic(sign(attacker, { senderId: 'stranger:device' })),
+    'key already pinned'
+  );
 }
 
 rmSync(outDir, { recursive: true, force: true });

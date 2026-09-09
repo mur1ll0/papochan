@@ -1,3 +1,5 @@
+import { canonicalJsonStringify, verifySignature } from '../crypto/keygen';
+
 export type DeviceType = 'desktop' | 'mobile' | 'browser';
 
 export interface TrackMap {
@@ -31,7 +33,6 @@ export type SignalMessageType =
   | 'offer'
   | 'answer'
   | 'ice-candidate'
-  | 'renegotiate'
   | 'device-state-update'
   | 'leave'
   | 'knock'
@@ -63,7 +64,6 @@ export interface SignalingEvents {
   onOffer: (senderId: string, sdp: RTCSessionDescriptionInit, senderMeta: DeviceMetadata) => void;
   onAnswer: (senderId: string, sdp: RTCSessionDescriptionInit) => void;
   onCandidate: (senderId: string, candidate: RTCIceCandidateInit) => void;
-  onRenegotiate: (senderId: string) => void;
   onDeviceStateUpdate: (senderId: string, capabilities: DeviceMetadata['capabilities']) => void;
   onKnock: (request: KnockRequest) => void;
   onKnockApproved: (approverId: string) => void;
@@ -78,12 +78,66 @@ export interface SignalingEvents {
 }
 
 export abstract class SignalingClient {
+  /**
+   * Signing key seen the first time each sender spoke, so it cannot change
+   * afterwards.
+   */
+  private pinnedKeys = new Map<string, string>();
+
+  /**
+   * Decides whether an envelope really came from the peer it names.
+   *
+   * The signature alone does not establish that: the envelope carries its own
+   * publicKeyEd, so anyone can mint a keypair, put someone else's senderId on
+   * the envelope and sign it with their own key - it verifies perfectly. Pinning
+   * the key to the sender on first sight is what turns a valid signature into
+   * proof of identity.
+   *
+   * Both matter, because a room code is the only thing needed to reach a room's
+   * channel. Without this, anyone holding one could forge a knock-approved and
+   * admit themselves, or inject an offer and take over the negotiation.
+   */
+  protected isEnvelopeAuthentic(envelope: SignalEnvelope): boolean {
+    if (!envelope?.senderId || !envelope.publicKeyEd || !envelope.signature) {
+      return false;
+    }
+
+    const pinned = this.pinnedKeys.get(envelope.senderId);
+    if (pinned && pinned !== envelope.publicKeyEd) {
+      console.warn(
+        `[Signaling] Rejected "${envelope.type}": ${envelope.senderId} presented a different signing key.`
+      );
+      return false;
+    }
+
+    const canonicalPayload = canonicalJsonStringify(envelope.payload);
+    const signedString =
+      `${envelope.type}|${envelope.senderId}|${envelope.targetId || '*'}|` +
+      `${envelope.roomCode}|${envelope.timestamp}|${canonicalPayload}`;
+
+    if (!verifySignature(signedString, envelope.signature, envelope.publicKeyEd)) {
+      console.warn(
+        `[Signaling] Rejected "${envelope.type}" from ${envelope.senderId}: bad signature.`
+      );
+      return false;
+    }
+
+    if (!pinned) {
+      this.pinnedKeys.set(envelope.senderId, envelope.publicKeyEd);
+    }
+    return true;
+  }
+
+  /** Forgets pinned keys, for a fresh connection to a different room. */
+  protected resetPinnedKeys(): void {
+    this.pinnedKeys.clear();
+  }
+
   abstract connect(roomCode: string, localMeta: DeviceMetadata, secretKeyEd: Uint8Array): Promise<void>;
   abstract disconnect(): Promise<void>;
   abstract sendOffer(targetId: string, sdp: RTCSessionDescriptionInit): Promise<void>;
   abstract sendAnswer(targetId: string, sdp: RTCSessionDescriptionInit): Promise<void>;
   abstract sendCandidate(targetId: string, candidate: RTCIceCandidateInit): Promise<void>;
-  abstract sendRenegotiate(targetId: string): Promise<void>;
   abstract sendPresenceAnnounce(): Promise<void>;
   abstract sendStateUpdate(capabilities: DeviceMetadata['capabilities']): Promise<void>;
   abstract sendKnock(): Promise<void>;

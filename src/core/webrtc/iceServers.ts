@@ -152,11 +152,6 @@ export async function resolveIceServers(clientId?: string): Promise<RTCIceServer
   return servers;
 }
 
-/** Drops the cached credentials, forcing the next resolve to re-fetch. */
-export function invalidateIceServerCache(): void {
-  cachedServers = null;
-}
-
 /**
  * Drops entries that would make the RTCPeerConnection constructor throw, so a
  * misconfigured environment variable degrades connectivity instead of taking

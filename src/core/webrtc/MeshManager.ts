@@ -222,17 +222,6 @@ export class MeshManager {
         }
       },
 
-      onRenegotiate: async (senderId) => {
-        const peer = this.peers.get(senderId);
-        if (!peer || peer.isPolite) return;
-        try {
-          const offer = await peer.createOffer();
-          await this.signaler.sendOffer(senderId, offer);
-        } catch (err) {
-          this.reportSignalingFailure('renegotiate', senderId, err);
-        }
-      },
-
       onDeviceStateUpdate: (senderId, capabilities) => {
         const node = this.peerNodes.get(senderId);
         if (node) {

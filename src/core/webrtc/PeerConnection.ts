@@ -1,5 +1,5 @@
 import { DeviceMetadata } from '../signaling/SignalingClient';
-import { buildIceServers, sanitizeIceServers } from './iceServers';
+import { sanitizeIceServers } from './iceServers';
 
 export interface PeerConnectionOptions {
   localId: string;
@@ -13,9 +13,6 @@ export interface PeerConnectionOptions {
   onNegotiationNeeded: (targetId: string) => Promise<void> | void;
   onConnectionStateChange: (state: RTCPeerConnectionState, peerId: string) => void;
 }
-
-/** @deprecated Use `buildIceServers()` from ./iceServers instead. */
-export const DEFAULT_ICE_SERVERS: RTCIceServer[] = buildIceServers();
 
 /**
  * PeerConnection encapsulates RTCPeerConnection implementing the standard

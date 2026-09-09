@@ -34,7 +34,13 @@ Featuring a distinctive chameleon mascot and vibrant brand palette (*Papo Coral*
   - Voice and video streams are hardware-encrypted in transit with **DTLS-SRTP**.
   - Chat messages and file transfers are encrypted with **AES-256-GCM** using unique 96-bit IVs and verified with **SHA-256** checksum digests.
 - **Volatile In-Memory Chat**: Messages and files are never persisted to any database and are purged immediately when leaving the room or via the panic button (*wipe memory*).
+- **Signed Signaling**: Every signaling envelope is Ed25519-signed, and the signing key is pinned to its sender on first contact. An envelope that fails either check is dropped, not merely logged.
 - **Safety Numbers**: Visual cryptographic fingerprint inspection to verify the identity of other participants in the room.
+
+### 🚪 Admission Control
+- **Waiting Room**: Only the room creator enters unannounced. Everyone else knocks and waits for an explicit approval, which any participant can grant or decline.
+- **The gate withholds media, not just the UI**: an unapproved peer gets no `RTCPeerConnection` at all, so it cannot see or hear the room while it waits.
+- **Invited contacts skip the queue**: someone you dialed already consented by answering their ringing screen, so they are admitted without a second prompt. Nobody else is.
 
 ### 📱💻 2. Simultaneous Multi-Device Co-Presence
 - A single authenticated user identity (`userId`) can join the same room across multiple devices at once:
@@ -42,13 +48,16 @@ Featuring a distinctive chameleon mascot and vibrant brand palette (*Papo Coral*
   - **Computer / Laptop**: Used simultaneously for high-frame-rate **60 FPS screen sharing with internal system audio**.
 - The `MeshManager` engine orchestrates each hardware instance independently via composite `userId:deviceId` addressing, displaying sister instance badges without session takeover conflicts.
 
-### 🎙️ 3. On-Device AI Noise Suppression & Acoustic Diagnostics
-- **Neural Spectral Filter**: Eliminates keyboard clicks, fans, ambient noise, and background chatter directly in the browser with zero audio telemetry sent to external servers.
+### 🎙️ 3. On-Device Noise Suppression & Acoustic Diagnostics
+- **RNNoise (neural mode)**: A recurrent network trained on speech, running as a WebAssembly AudioWorklet entirely in the browser — zero audio telemetry. Three modes: `Off` (the browser's own DSP), `Standard` (highpass + gentle compression), and `Neural AI` (RNNoise).
+- **One cleanup stage, never two**: whenever the app's chain is active the browser's own noise suppression and gain control are switched off. Running both makes two gain controllers fight over the same voice, which is what produces a pumping, metallic, "robotic" result.
 - **Real-Time RMS Meters**: Live audio level meters in decibels (dB) with dynamic clipping and distortion detection.
+- **Per-participant volume**: Right click (or long press) any tile to set that device's output level on your machine alone — camera and screen share separately. Mobile browsers route WebRTC playback through the voice-call stream, where the phone's own volume keys do not reach it.
 
 ### 📞 4. Trusted Contacts & Direct Calling
-- Save verified devices and contacts into your local encrypted vault with custom aliases.
+- Save verified devices and contacts into your local encrypted vault with custom aliases — from the home screen, or straight from the participants panel during a call.
 - Place instant peer-to-peer direct calls with ringing tones, incoming/outgoing call popups, and auto-connection without needing manual room codes.
+- **Ring a contact into the call you are already in**: the participants panel lists your saved contacts, and inviting one rings their device without opening a new room.
 
 ### 🌐 5. Native Internationalization (i18n)
 - Seamless bilingual support for **English (US)** 🇺🇸 and **Português (Brasil)** 🇧🇷 with instant hot-switching from the navigation bar and in-call settings.
@@ -69,10 +78,10 @@ graph TB
         end
 
         subgraph WebRTCEngine["P2P Media & Data Layer"]
-            MediaEng["MediaEngine: Cam, Mic, AI Noise & 60FPS Screen"]
+            MediaEng["MediaEngine: Cam, Mic, RNNoise & 60FPS Screen"]
             DataChan["DataChannel: E2EE Chat & File Streams"]
             PeerConn["RTCPeerConnection (Perfect Negotiation)"]
-            MeshMgr["MeshManager (Multi-Device Co-Presence)"]
+            MeshMgr["MeshManager (Co-Presence + Admission Gate)"]
         end
 
         subgraph UILayer["Next.js 15 UI Layer (App Router + Tailwind CSS)"]
@@ -84,9 +93,15 @@ graph TB
     end
 
     subgraph SignalingBackend["Ephemeral Signaling & Database"]
-        Ably["Ably Realtime (Ephemeral Pub/Sub Channels)"]
-        NextAPI["Next.js API Routes (/api/rooms, /api/signaling-token)"]
+        Signaler["UniversalSignaler (Ably WebSocket, HTTP bus fallback)"]
+        Ably["Ably Realtime (namespaced per environment)"]
+        NextAPI["Next.js API Routes (/api/signaling, /api/signaling-token, /api/turn-credentials)"]
         PrismaDB[("Neon Serverless PostgreSQL (Public Metadata Only)")]
+    end
+
+    subgraph Relay["Connectivity"]
+        Stun["STUN (host / srflx discovery)"]
+        Turn["TURN relay (symmetric NAT & CGNAT fallback)"]
     end
 
     KeyGen --> KeyStore
@@ -95,9 +110,13 @@ graph TB
     AESCipher <--> DataChan
     MediaEng --> PeerConn
     PeerConn <--> MeshMgr
-    MeshMgr <--> Ably
+    PeerConn --> Stun
+    PeerConn --> Turn
+    MeshMgr <--> Signaler
+    Signaler <--> Ably
+    Signaler <--> NextAPI
     NextAPI <--> PrismaDB
-    NextAPI --> Ably
+    NextAPI --> Turn
     HomePage --> LobbyModal
     LobbyModal --> RoomPage
     RoomPage --> MeshMgr
@@ -127,7 +146,9 @@ papochan/
 │   │   ├── api/
 │   │   │   ├── auth/device/       # Device public key registration & heartbeat
 │   │   │   ├── rooms/             # Room creation and code lookup
-│   │   │   └── signaling-token/   # Ephemeral signaling token generator
+│   │   │   ├── signaling/         # HTTP signaling bus (fallback transport)
+│   │   │   ├── signaling-token/   # Ephemeral Ably token, scoped per environment
+│   │   │   └── turn-credentials/  # Short-lived TURN credentials (HMAC)
 │   │   ├── room/[code]/page.tsx   # Video conference room with stage and grid
 │   │   ├── page.tsx               # Centered hero landing page & contact vault
 │   │   ├── layout.tsx             # Global layout with i18n & crypto providers
@@ -135,19 +156,31 @@ papochan/
 │   ├── components/
 │   │   ├── auth/                  # DeviceSetupModal (Pre-join lobby) and SecurityModal
 │   │   ├── brand/                 # ChameleonLogo, PapoChanWordmark, LanguageSwitcher
-│   │   ├── call/                  # ControlBar, VideoGrid, VideoTile, ScreenShareModal
+│   │   ├── call/                  # ControlBar, VideoGrid, VideoTile, ScreenShareModal,
+│   │   │                              # ParticipantsPanel, WaitingRoomOverlay, KnockApprovalModal
 │   │   ├── chat/                  # ChatPanel (E2EE chat and file streaming)
 │   │   └── contacts/              # ContactsList, SaveContactModal
 │   ├── core/
 │   │   ├── crypto/                # keygen.ts, cipher.ts, storage.ts (IndexedDB)
-│   │   ├── signaling/             # SignalingClient.ts, AblySignaler.ts
+│   │   ├── signaling/             # SignalingClient.ts (envelope authentication),
+│   │   │                          # AblySignaler.ts, HttpSignaler.ts, UniversalSignaler.ts
 │   │   └── webrtc/                # PeerConnection.ts, MeshManager.ts, MediaEngine.ts,
-│   │                              # NoiseSuppressionEngine.ts, AudioDiagnostics.ts, DataChannel.ts
+│   │                              # NoiseSuppressionEngine.ts, iceServers.ts,
+│   │                              # AudioDiagnostics.ts, DataChannel.ts
 │   ├── hooks/                     # useCrypto.ts, useDirectCalls.ts, useMediaDevices.ts, useWebRTC.ts
 │   ├── i18n/                      # translations.ts (pt-BR / en) and context.tsx
-│   └── lib/                       # db.ts (Prisma), ably.ts, api.ts, utils.ts
+│   └── lib/                       # db.ts, ably.ts, api.ts, turn.ts, environment.ts, utils.ts
+├── deploy/coturn/                 # Self-hosted TURN relay (config, compose, walkthrough)
+├── docs/
+│   ├── security.md                # What is protected, how, and the known limits
+│   └── environments.md            # Keeping development traffic away from production
+├── scripts/
+│   ├── test-mesh-negotiation.mjs  # Regression suite (npm run test:mesh)
+│   ├── cleanup-signaling.mjs      # Signaling table maintenance
+│   ├── copy-noise-suppressor-assets.mjs
+│   └── patch-android-manifest.mjs # Camera/mic permissions for the Android build
 └── prisma/
-    └── schema.prisma              # Database schema (Device and Room entities)
+    └── schema.prisma              # Database schema
 ```
 
 ---
@@ -197,6 +230,26 @@ npm run dev
 ```
 Open [http://localhost:3000](http://localhost:3000) in your browser.
 
+Development signaling is namespaced away from production automatically, so a
+local client can never join a production room even with the same room code. Give
+development its own database and Ably app as well — see
+[docs/environments.md](docs/environments.md).
+
+### 5. Connectivity beyond your own network
+
+STUN alone only finds direct paths. Peers behind symmetric NAT or CGNAT — most
+mobile carriers — need a TURN relay, without which media and the data channel
+fail silently while chat keeps working. The app falls back to a shared public
+relay so it works out of the box; provision your own before carrying real
+traffic: [deploy/coturn/README.md](deploy/coturn/README.md).
+
+### Tests
+
+```bash
+npm run test:mesh   # negotiation, admission, signing, ICE and environment isolation
+npx tsc --noEmit
+```
+
 ---
 
 ## 📦 Build & Production Verification
@@ -225,6 +278,24 @@ npm run start
 | **Stealth Emerald** | `#10B981` | Active E2EE encryption badges, audio meters, and status pills |
 | **Dark Slate** | `#020617` | Primary dark theme background (`bg-slate-950`) |
 | **Pure White** | `#FFFFFF` | Vector chameleon contours and stylized wordmark in dark mode |
+
+---
+
+## 🔐 Security
+
+[docs/security.md](docs/security.md) sets out what is actually protected, how each
+guarantee is enforced, and where the limits are — including the ones that are not
+flattering: rate limiting is per serverless instance, key pinning is trust-on-first-use,
+and signaling metadata is visible to the server.
+
+Two things worth knowing up front:
+
+- **Never put a TURN password in a `NEXT_PUBLIC_*` variable.** Those are inlined
+  into the browser bundle. Use `TURN_SECRET` and let `/api/turn-credentials` mint
+  short-lived credentials.
+- **Share the room code, or the link from the Copy button.** A URL you copied out
+  of the address bar may still carry `?host=1`, which tells the app the person
+  opening it owns the room.
 
 ---
 

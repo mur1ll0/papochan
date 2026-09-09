@@ -236,10 +236,6 @@ export class NoiseSuppressionEngine {
     }
   }
 
-  public getProcessedStream(): MediaStream {
-    return this.destinationNode.stream;
-  }
-
   public destroy(): void {
     this.isDestroyed = true;
     if (this.sourceNode) {

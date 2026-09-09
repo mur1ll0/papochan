@@ -5,7 +5,7 @@ import {
   SignalEnvelope,
   SignalMessageType,
 } from './SignalingClient';
-import { signPayload, verifySignature, canonicalJsonStringify } from '../crypto/keygen';
+import { signPayload, canonicalJsonStringify } from '../crypto/keygen';
 import { getApiEndpoint } from '@/lib/api';
 import { namespacedRoomCode } from '@/lib/environment';
 
@@ -48,6 +48,7 @@ export class HttpSignaler extends SignalingClient {
     this.secretKeyEd = secretKeyEd;
     this.lastPollTimestamp = Date.now() - 10000;
     this.processedSignatures.clear();
+    this.resetPinnedKeys();
 
     this.events.onConnectionStateChange?.('connecting');
 
@@ -142,10 +143,6 @@ export class HttpSignaler extends SignalingClient {
 
   public async sendCandidate(targetId: string, candidate: RTCIceCandidateInit): Promise<void> {
     await this.publishEnvelope('ice-candidate', { candidate }, targetId);
-  }
-
-  public async sendRenegotiate(targetId: string): Promise<void> {
-    await this.publishEnvelope('renegotiate', {}, targetId);
   }
 
   public async sendPresenceAnnounce(): Promise<void> {
@@ -326,27 +323,8 @@ export class HttpSignaler extends SignalingClient {
     if (envelope.senderId === myClientId) return;
     if (envelope.targetId && envelope.targetId !== myClientId) return;
 
-    const canonicalPayload = canonicalJsonStringify(envelope.payload);
-    const verificationString = `${envelope.type}|${envelope.senderId}|${envelope.targetId || '*'}|${envelope.roomCode}|${envelope.timestamp}|${canonicalPayload}`;
-    let isValid = verifySignature(
-      verificationString,
-      envelope.signature,
-      envelope.publicKeyEd
-    );
-
-    // Fallback check for uncanonicalized payload format
-    if (!isValid) {
-      const fallbackString = `${envelope.type}|${envelope.senderId}|${envelope.targetId || '*'}|${envelope.roomCode}|${envelope.timestamp}|${JSON.stringify(envelope.payload)}`;
-      isValid = verifySignature(
-        fallbackString,
-        envelope.signature,
-        envelope.publicKeyEd
-      );
-    }
-
-    if (!isValid) {
-      console.warn('[HttpSignaler] Signature mismatch on signal from:', envelope.senderId, 'type:', envelope.type);
-    }
+    // Unauthenticated signaling is dropped, not merely logged.
+    if (!this.isEnvelopeAuthentic(envelope)) return;
 
     switch (envelope.type) {
       case 'presence-announce': {
@@ -374,10 +352,6 @@ export class HttpSignaler extends SignalingClient {
       case 'ice-candidate': {
         const { candidate } = envelope.payload as { candidate: RTCIceCandidateInit };
         this.events.onCandidate?.(envelope.senderId, candidate);
-        break;
-      }
-      case 'renegotiate': {
-        this.events.onRenegotiate?.(envelope.senderId);
         break;
       }
       case 'device-state-update': {
