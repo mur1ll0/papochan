@@ -139,3 +139,6 @@ dist
 .yarn/build-state.yml
 .yarn/install-state.gz
 .pnp.*
+
+# Copied from node_modules at build time (scripts/copy-noise-suppressor-assets.mjs)
+public/audio-worklets/

@@ -4,10 +4,10 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "prisma generate && next build",
+    "build": "node scripts/copy-noise-suppressor-assets.mjs && prisma generate && next build",
     "start": "next start",
     "lint": "next lint",
-    "postinstall": "prisma generate && node scripts/patch-ably.js",
+    "postinstall": "prisma generate && node scripts/patch-ably.js && node scripts/copy-noise-suppressor-assets.mjs",
     "prisma:generate": "prisma generate",
     "prisma:push": "prisma db push",
 
