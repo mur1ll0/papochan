@@ -80,6 +80,15 @@ were signed over a different canonical form and are now rejected rather than
 tolerated. After deploying, every device should hard-refresh. A client that
 cannot connect while others can is almost always a stale bundle.
 
+## Platform limits worth knowing
+
+**Screen sharing works only on desktop.** Neither Android nor iOS exposes
+getDisplayMedia - to any browser, and not to the system WebView either - because
+screen capture there goes through native MediaProjection / ReplayKit rather than
+a web API. Mobile devices still *receive* and display a screen share normally;
+they just cannot originate one. The button is disabled there rather than failing
+when pressed.
+
 ## Reporting
 
 Found something? Open an issue without the exploit details and ask for a private

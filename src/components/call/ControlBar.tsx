@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Mic,
   MicOff,
@@ -20,6 +20,7 @@ import { MediaDevicesList } from '@/core/webrtc/MediaEngine';
 import { NoiseSuppressionMode } from '@/core/webrtc/NoiseSuppressionEngine';
 import { ScreenShareModal } from './ScreenShareModal';
 import { useI18n } from '@/i18n/context';
+import { isScreenShareSupported } from '@/lib/platform';
 import { cn } from '@/lib/utils';
 
 export interface ControlBarProps {
@@ -74,6 +75,13 @@ export function ControlBar({
   const { t, locale, setLocale } = useI18n();
   const [showSettings, setShowSettings] = useState(false);
   const [showScreenModal, setShowScreenModal] = useState(false);
+  // Resolved after mount: it depends on navigator, which the server render has no
+  // view of, and a mismatch would flash the wrong button.
+  const [canShareScreen, setCanShareScreen] = useState(true);
+
+  useEffect(() => {
+    setCanShareScreen(isScreenShareSupported());
+  }, []);
 
   const handleScreenButtonClick = () => {
     if (isScreenSharing) {
@@ -124,13 +132,22 @@ export function ControlBar({
         <div className="relative flex items-center gap-1">
           <button
             onClick={handleScreenButtonClick}
+            disabled={!canShareScreen}
             className={cn(
               'flex items-center justify-center w-11 h-11 rounded-xl transition-all cursor-pointer',
-              isScreenSharing
+              !canShareScreen
+                ? 'bg-slate-900 border border-slate-800 text-slate-600 cursor-not-allowed'
+                : isScreenSharing
                 ? 'bg-chan-turquoise text-slate-950 font-bold shadow-lg shadow-chan-turquoise/30 animate-pulse'
                 : 'bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 hover:text-white'
             )}
-            title={isScreenSharing ? t('call.control.screen.stop') : t('call.control.screen.share')}
+            title={
+              !canShareScreen
+                ? 'Celulares e tablets não permitem compartilhar a própria tela. Você continua vendo a tela dos outros.'
+                : isScreenSharing
+                ? t('call.control.screen.stop')
+                : t('call.control.screen.share')
+            }
           >
             <ScreenShare className="w-5 h-5" />
           </button>

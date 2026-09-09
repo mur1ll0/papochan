@@ -90,6 +90,24 @@ export const PLATFORMS_CONFIG: Record<PlatformType, PlatformMetadata> = {
 /**
  * Detects the client operating system based on User-Agent and platform properties.
  */
+/**
+ * Whether this device can capture its own screen.
+ *
+ * Android and iOS have no getDisplayMedia at all - neither the system WebView
+ * nor the mobile browsers implement it, because screen capture there goes
+ * through native MediaProjection / ReplayKit rather than a web API. Asking and
+ * catching the failure produced a message telling people to switch to a desktop
+ * browser while they were sitting in the Android app.
+ */
+export function isScreenShareSupported(): boolean {
+  if (typeof navigator === 'undefined') return false;
+  if (typeof navigator.mediaDevices?.getDisplayMedia !== 'function') return false;
+
+  // Present but non-functional on mobile builds of some browsers.
+  const os = detectOS();
+  return os !== 'android' && os !== 'ios';
+}
+
 export function detectOS(): PlatformType {
   if (typeof window === 'undefined') return 'web';
 

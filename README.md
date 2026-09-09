@@ -45,7 +45,7 @@ Featuring a distinctive chameleon mascot and vibrant brand palette (*Papo Coral*
 ### 📱💻 2. Simultaneous Multi-Device Co-Presence
 - A single authenticated user identity (`userId`) can join the same room across multiple devices at once:
   - **Smartphone / Tablet**: Used for front/rear camera capture and close-proximity voice microphone.
-  - **Computer / Laptop**: Used simultaneously for high-frame-rate **60 FPS screen sharing with internal system audio**.
+  - **Computer / Laptop**: Used simultaneously for high-frame-rate **60 FPS screen sharing with internal system audio**. Sharing your own screen is desktop-only: Android and iOS do not expose `getDisplayMedia` to any browser or WebView. Phones still receive and display a shared screen normally.
 - The `MeshManager` engine orchestrates each hardware instance independently via composite `userId:deviceId` addressing, displaying sister instance badges without session takeover conflicts.
 
 ### 🎙️ 3. On-Device Noise Suppression & Acoustic Diagnostics

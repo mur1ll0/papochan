@@ -6,6 +6,7 @@ import {
   NoiseSuppressionEngine,
   NoiseSuppressionMode,
 } from './NoiseSuppressionEngine';
+import { isScreenShareSupported } from '@/lib/platform';
 
 export interface MediaDevicesList {
   audioInputs: MediaDeviceInfo[];
@@ -52,6 +53,20 @@ export class MediaEngine {
       this.noiseSuppressionMode = config.noiseSuppressionMode;
     }
     this.setupDeviceChangeListener();
+  }
+
+  /**
+   * Picks the camera: by id when one was chosen, by facing direction otherwise.
+   *
+   * Never both. Asking for an exact deviceId while also asking to face the user
+   * is contradictory the moment the chosen camera is the rear one, and Android
+   * resolves it by handing back a track that never produces a frame - the camera
+   * appears to freeze the instant you switch to it.
+   */
+  private cameraSelection(): MediaTrackConstraints {
+    return this.config.videoDeviceId
+      ? { deviceId: { exact: this.config.videoDeviceId } }
+      : { facingMode: 'user' };
   }
 
   private setupDeviceChangeListener(): void {
@@ -174,8 +189,7 @@ export class MediaEngine {
     };
 
     const videoConstraints: MediaTrackConstraints | boolean = {
-      deviceId: this.config.videoDeviceId ? { exact: this.config.videoDeviceId } : undefined,
-      facingMode: 'user',
+      ...this.cameraSelection(),
       width: { ideal: 1280, max: 1920 },
       height: { ideal: 720, max: 1080 },
       frameRate: { ideal: 30, max: 60 },
@@ -192,7 +206,9 @@ export class MediaEngine {
       try {
         this.rawUserStream = await navigator.mediaDevices.getUserMedia({
           audio: true,
-          video: video ? { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } } : false,
+          video: video
+            ? { ...this.cameraSelection(), width: { ideal: 640 }, height: { ideal: 480 } }
+            : false,
         });
       } catch (fbErr1) {
         console.warn('[MediaEngine] Mobile resolution fallback failed, trying plain getUserMedia...', fbErr1);
@@ -243,13 +259,15 @@ export class MediaEngine {
   ): Promise<MediaStream> {
     this.stopScreenShare();
 
-    if (
-      typeof navigator === 'undefined' ||
-      !navigator.mediaDevices ||
-      !navigator.mediaDevices.getDisplayMedia
-    ) {
+    if (!isScreenShareSupported()) {
+      const onMobile = /Android|iPhone|iPad|iPod/i.test(
+        typeof navigator === 'undefined' ? '' : navigator.userAgent
+      );
+
       throw new Error(
-        'O compartilhamento de tela não está disponível neste navegador ou conexão. Certifique-se de usar um navegador Desktop (Chrome, Edge, Firefox, Brave) e acessar via http://localhost ou HTTPS.'
+        onMobile
+          ? 'Compartilhar a própria tela não é possível em celulares e tablets: nem o Android nem o iOS oferecem essa função para aplicativos web. Você continua vendo normalmente a tela que os outros compartilharem. Para compartilhar a sua, use o PapoChan no computador.'
+          : 'O compartilhamento de tela não está disponível neste navegador. Use Chrome, Edge, Firefox ou Brave no computador, por http://localhost ou HTTPS.'
       );
     }
 
@@ -334,6 +352,11 @@ export class MediaEngine {
     if (!this.rawUserStream || typeof window === 'undefined') return;
 
     const audioTrack = this.rawUserStream.getAudioTracks()[0];
+
+    // With no audio there is no pipeline to build, but the processed stream must
+    // still be refreshed: leaving the previous one in place means getUserStream()
+    // keeps handing out tracks that were stopped when the camera was swapped,
+    // which freezes the preview and keeps the far side on a dead track.
     if (!audioTrack) return;
 
     try {
@@ -469,15 +492,14 @@ export class MediaEngine {
       try {
         const freshVideoStream = await navigator.mediaDevices.getUserMedia({
           video: {
-            deviceId: this.config.videoDeviceId ? { exact: this.config.videoDeviceId } : undefined,
-            facingMode: 'user',
+            ...this.cameraSelection(),
             width: { ideal: 1280, max: 1920 },
             height: { ideal: 720, max: 1080 },
           },
           audio: false,
         }).catch(() =>
           navigator.mediaDevices.getUserMedia({
-            video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } },
+            video: { ...this.cameraSelection(), width: { ideal: 640 }, height: { ideal: 480 } },
             audio: false,
           })
         ).catch(() =>
