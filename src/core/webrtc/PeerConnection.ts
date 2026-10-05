@@ -35,10 +35,14 @@ export class PeerConnection {
   private isClosed = false;
   private offerRetryTimer: ReturnType<typeof setTimeout> | null = null;
   private offerRetries = 0;
+  private audioQualityTimer: ReturnType<typeof setInterval> | null = null;
+  private lastAudioStats = new Map<string, { concealed: number; samples: number; lost: number; received: number }>();
 
   /** How long to wait for an answer before assuming the offer was lost. */
   private static readonly OFFER_ANSWER_TIMEOUT_MS = 4000;
   private static readonly MAX_OFFER_RETRIES = 3;
+  /** How often incoming audio is checked for concealment. */
+  private static readonly AUDIO_QUALITY_INTERVAL_MS = 5000;
 
   constructor(private options: PeerConnectionOptions) {
     this.localId = options.localId;
@@ -116,6 +120,7 @@ export class PeerConnection {
 
       if (state === 'connected') {
         this.logSelectedCandidatePair();
+        this.startAudioQualityMonitor();
       }
 
       if (state === 'failed') {
@@ -450,6 +455,56 @@ export class PeerConnection {
     }
   }
 
+  /**
+   * Warns when the incoming voice is being reconstructed rather than played.
+   *
+   * A robotic, metallic voice is usually not a microphone problem at all: when
+   * packets arrive late or not at all, the jitter buffer synthesises the gaps
+   * (concealment), and stretched synthetic speech is exactly that sound. No
+   * noise suppression mode on either side can change it. Logging the share of
+   * concealed audio next to loss and jitter tells the two causes apart.
+   */
+  private startAudioQualityMonitor(): void {
+    if (this.audioQualityTimer) return;
+
+    this.audioQualityTimer = setInterval(async () => {
+      if (this.isClosed) return;
+      try {
+        const stats = (await this.pc.getStats()) as unknown as Map<string, any>;
+        stats.forEach((report: any) => {
+          if (report.type !== 'inbound-rtp' || report.kind !== 'audio') return;
+
+          const now = {
+            concealed: report.concealedSamples ?? 0,
+            samples: report.totalSamplesReceived ?? 0,
+            lost: report.packetsLost ?? 0,
+            received: report.packetsReceived ?? 0,
+          };
+          const prev = this.lastAudioStats.get(report.id);
+          this.lastAudioStats.set(report.id, now);
+          if (!prev) return;
+
+          const samples = now.samples - prev.samples;
+          const packets = now.received - prev.received + (now.lost - prev.lost);
+          if (samples <= 0) return;
+
+          const concealedPct = ((now.concealed - prev.concealed) / samples) * 100;
+          if (concealedPct < 3) return;
+
+          const lossPct = packets > 0 ? ((now.lost - prev.lost) / packets) * 100 : 0;
+          console.warn(
+            `[PeerConnection:${this.remoteId}] Incoming audio degraded: ` +
+              `${concealedPct.toFixed(1)}% concealed, ${lossPct.toFixed(1)}% packets lost, ` +
+              `jitter ${Math.round((report.jitter ?? 0) * 1000)} ms. This is the network ` +
+              `path, not the sender's microphone or noise suppression.`
+          );
+        });
+      } catch {
+        // stats are best-effort diagnostics only
+      }
+    }, PeerConnection.AUDIO_QUALITY_INTERVAL_MS);
+  }
+
   public getRemoteStream(): MediaStream {
     return this.remoteStream;
   }
@@ -457,6 +512,10 @@ export class PeerConnection {
   public close(): void {
     this.isClosed = true;
     this.clearOfferRetry();
+    if (this.audioQualityTimer) {
+      clearInterval(this.audioQualityTimer);
+      this.audioQualityTimer = null;
+    }
     try {
       if (this.dataChannel) {
         this.dataChannel.close();

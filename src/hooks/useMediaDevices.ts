@@ -152,7 +152,16 @@ export function useMediaDevices(options: UseMediaDevicesOptions = {}) {
 
   const setNoiseSuppressionMode = useCallback((mode: NoiseSuppressionMode) => {
     setNoiseSuppressionModeState(mode);
-    engineRef.current?.setNoiseSuppressionMode(mode);
+    if (!engineRef.current) return;
+    engineRef.current.setNoiseSuppressionMode(mode);
+
+    // Moving in or out of 'off' changes which audio track is sent. A fresh
+    // stream object changes the local track ids, which is what makes the room
+    // push the new track onto the peers' senders.
+    const stream = engineRef.current.getUserStream();
+    if (stream) {
+      setUserStream(new MediaStream(stream.getTracks()));
+    }
   }, []);
 
   const startScreenShare = useCallback(

@@ -34,6 +34,7 @@ export class MediaEngine {
   private audioSource: MediaStreamAudioSourceNode | null = null;
   private diagnosticsAnalyzer: AudioDiagnosticsAnalyzer | null = null;
   private noiseSuppressionEngine: NoiseSuppressionEngine | null = null;
+  private processedAudioTrack: MediaStreamTrack | null = null;
 
   private volumeInterval: any = null;
   private onVolumeCallback?: (volume: number) => void;
@@ -90,44 +91,69 @@ export class MediaEngine {
     this.onScreenShareEndedCallback = callback;
   }
 
+  /**
+   * Switches mode, and with it which audio track goes out to the peers.
+   *
+   * 'off' sends the microphone track itself, so Web Audio leaves the call path
+   * entirely. Callers must re-sync the senders afterwards: the outgoing track id
+   * changes whenever the mode crosses between 'off' and the processed modes.
+   */
   public setNoiseSuppressionMode(mode: NoiseSuppressionMode): void {
     this.noiseSuppressionMode = mode;
     this.noiseSuppressionEngine?.setMode(mode);
-    this.applyCaptureCleanup();
+    this.swapOutgoingAudioTrack();
   }
 
   /**
-   * Decides who cleans up the microphone: the browser's capture-stage DSP, or
-   * our own Web Audio chain.
+   * The track the peers should receive: the processed one for 'standard' and
+   * 'ai-neural', the raw microphone for 'off'.
    *
-   * Running both is what makes voices sound robotic. The browser's automatic
-   * gain control rides the level continuously, then our compressor squashes the
-   * same signal again - two gain controllers fighting over one voice produce the
-   * pumping, metallic artefact. Its spectral noise gate plus our notch and
-   * lowpass add musical noise on top. Double processing also flattened the
-   * difference between our own modes, since the browser was doing the heavy
-   * lifting underneath whichever one was selected.
+   * Every mode used to send the AudioContext's output, 'off' included, which
+   * merely wired source straight to destination. So whatever that bridge does
+   * to the audio - resampling into a context forced to 48 kHz, drift between
+   * the microphone clock and the output device clock that drives rendering
+   * (Bluetooth headsets drop to 16 kHz in hands-free mode), render underruns -
+   * reached the other side identically in all three modes, and switching mode
+   * could never make a robotic voice go away.
+   */
+  private outgoingAudioTrack(): MediaStreamTrack | undefined {
+    const rawTrack = this.rawUserStream?.getAudioTracks()[0];
+    if (this.noiseSuppressionMode === 'off') return rawTrack;
+    return this.processedAudioTrack ?? rawTrack;
+  }
+
+  private swapOutgoingAudioTrack(): void {
+    const stream = this.processedUserStream;
+    const next = this.outgoingAudioTrack();
+    if (!stream || !next || stream === this.rawUserStream) return;
+
+    const current = stream.getAudioTracks()[0];
+    if (current === next) return;
+
+    next.enabled = !this.isAudioMuted;
+    if (current) stream.removeTrack(current);
+    stream.addTrack(next);
+  }
+
+  /**
+   * The browser's capture-stage cleanup stays off in every mode.
+   *
+   * Running it under our chain is what made voices robotic before: its
+   * automatic gain control rides the level while our compressor squashes the
+   * same signal again, and its spectral gate adds musical noise on top. It is
+   * not switched on for 'off' either - the mode promises raw audio, and Chrome
+   * does not apply audio processing constraints to a live track anyway, so a
+   * mid-call change would only ever take effect on the next device switch.
    *
    * Echo cancellation always stays on: it needs the far-end reference that only
    * the capture stage has, and cannot be reproduced in Web Audio.
    */
   private captureCleanupConstraints(): MediaTrackConstraints {
-    const browserHandlesCleanup = this.noiseSuppressionMode === 'off';
     return {
       echoCancellation: this.config.enableEchoCancellation ?? true,
-      noiseSuppression: this.config.enableNoiseSuppression ?? browserHandlesCleanup,
-      autoGainControl: this.config.enableAutoGainControl ?? browserHandlesCleanup,
+      noiseSuppression: this.config.enableNoiseSuppression ?? false,
+      autoGainControl: this.config.enableAutoGainControl ?? false,
     };
-  }
-
-  /** Retunes the live capture track when the mode changes mid-call. */
-  private applyCaptureCleanup(): void {
-    const track = this.rawUserStream?.getAudioTracks()[0];
-    if (!track || track.readyState !== 'live') return;
-
-    track
-      .applyConstraints(this.captureCleanupConstraints())
-      .catch((err) => console.warn('[MediaEngine] Could not retune capture cleanup:', err));
   }
 
   public static async listDevices(): Promise<MediaDevicesList> {
@@ -363,6 +389,12 @@ export class MediaEngine {
       const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
       if (!AudioCtx) return;
 
+      // Re-entered when a muted-and-ended microphone is re-acquired: release the
+      // previous engine with its context, or its RNNoise worklet keeps running.
+      this.noiseSuppressionEngine?.destroy();
+      this.noiseSuppressionEngine = null;
+      this.processedAudioTrack = null;
+
       if (this.audioContext && this.audioContext.state !== 'closed') {
         this.audioContext.close();
       }
@@ -391,11 +423,12 @@ export class MediaEngine {
       });
 
       const processedAudioTrack = this.noiseSuppressionEngine.attachSourceTrack(audioTrack);
-      if (processedAudioTrack) {
+      if (processedAudioTrack !== audioTrack) {
         processedAudioTrack.enabled = audioTrack.enabled;
+        this.processedAudioTrack = processedAudioTrack;
       }
 
-      const tracks: MediaStreamTrack[] = [processedAudioTrack || audioTrack];
+      const tracks: MediaStreamTrack[] = [this.outgoingAudioTrack() ?? audioTrack];
       const videoTrack = this.rawUserStream.getVideoTracks()[0];
       if (videoTrack) {
         tracks.push(videoTrack);
@@ -441,10 +474,11 @@ export class MediaEngine {
     if (!audioTrack || audioTrack.readyState === 'ended') {
       try {
         const freshAudioStream = await navigator.mediaDevices.getUserMedia({
+          // Same constraints as the first capture: hardcoding the browser's
+          // cleanup on here brought the double processing back after a re-mute.
           audio: {
-            echoCancellation: this.config.enableEchoCancellation ?? true,
-            noiseSuppression: this.config.enableNoiseSuppression ?? true,
-            autoGainControl: this.config.enableAutoGainControl ?? true,
+            deviceId: this.config.audioDeviceId ? { exact: this.config.audioDeviceId } : undefined,
+            ...this.captureCleanupConstraints(),
           },
           video: false,
         });
@@ -453,7 +487,6 @@ export class MediaEngine {
         if (newAudioTrack) {
           if (audioTrack) {
             this.rawUserStream.removeTrack(audioTrack);
-            this.processedUserStream?.removeTrack(audioTrack);
           }
           this.rawUserStream.addTrack(newAudioTrack);
           this.setupAudioPipeline();
@@ -612,6 +645,7 @@ export class MediaEngine {
       this.noiseSuppressionEngine.destroy();
       this.noiseSuppressionEngine = null;
     }
+    this.processedAudioTrack = null;
     if (this.audioContext && this.audioContext.state !== 'closed') {
       this.audioContext.close();
       this.audioContext = null;
